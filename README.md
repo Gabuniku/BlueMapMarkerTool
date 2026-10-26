@@ -78,3 +78,15 @@ Marker data is stored in `config/xynovia/markers.json` and pushed to BlueMap's l
 ## Credits
 
 Built on top of [BlueMap](https://github.com/BlueMap-Minecraft/BlueMap) by [BlueColored](https://github.com/TBlueF).
+
+
+## Navigation routes and fairways (experimental)
+
+The browser editor supports two additional marker types:
+
+- **Route**: click points in order to draw an open shipping route. Configure the line width in screen pixels.
+- **Fairway**: choose **Centerline + width** to define a navigable corridor with a real width measured in Minecraft blocks, or **Polygon** to define the boundary of a complex waterway by hand. Fairway shapes appear as translucent polygons.
+
+Choose **Edit** to drag points, insert points on a segment, or double-click a point to remove it (subject to a minimum of two centerline points or three polygon points). Each point can have an optional name; named waypoints appear in a separate, initially hidden **Waypoints** layer. Both route and fairway coordinates are stored in `config/xynovia/markers.json` along with existing marker types.
+
+This is a map annotation tool, not automatic ship navigation or collision-safe route planning. Corridor offsets use bounded miter joins; sharp turns may need manually placed points or a polygon fairway. Ports do not require detailed internal navigation polygons.

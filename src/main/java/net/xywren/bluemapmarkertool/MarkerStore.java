@@ -3,6 +3,9 @@ package net.xywren.bluemapmarkertool;
 import de.bluecolored.bluemap.api.BlueMapAPI;
 import de.bluecolored.bluemap.api.BlueMapMap;
 import de.bluecolored.bluemap.api.markers.HtmlMarker;
+import de.bluecolored.bluemap.api.markers.LineMarker;
+import de.bluecolored.bluemap.api.math.Line;
+import com.flowpowered.math.vector.Vector3d;
 import de.bluecolored.bluemap.api.markers.MarkerSet;
 import de.bluecolored.bluemap.api.markers.ShapeMarker;
 import de.bluecolored.bluemap.api.math.Color;
@@ -96,37 +99,54 @@ public class MarkerStore {
             return;
         }
         BlueMapMap map = mapOpt.get();
-
         map.getMarkerSets().remove("xyn-areas");
 
         MarkerSet areas = new MarkerSet("Areas");
-        areas.setToggleable(true);
         MarkerSet labels = new MarkerSet("Text Labels");
-        labels.setToggleable(true);
-
-        parseAndAddMarkers(areas, labels);
-
-        if (!areas.getMarkers().isEmpty()) {
-            map.getMarkerSets().put("areas", areas);
-        } else {
-            map.getMarkerSets().remove("areas");
+        MarkerSet roads = new MarkerSet("Roads");
+        MarkerSet seaRoutes = new MarkerSet("Sea Routes");
+        MarkerSet airRoutes = new MarkerSet("Air Routes");
+        for (MarkerSet set : List.of(areas, labels, roads, seaRoutes, airRoutes)) {
+            set.setToggleable(true);
         }
-        if (!labels.getMarkers().isEmpty()) {
-            map.getMarkerSets().put("labels", labels);
+
+        parseAndAddMarkers(areas, labels, roads, seaRoutes, airRoutes);
+
+        updateSet(map, "areas", areas);
+        updateSet(map, "labels", labels);
+        updateSet(map, "roads", roads);
+        updateSet(map, "sea_routes", seaRoutes);
+        updateSet(map, "air_routes", airRoutes);
+    }
+
+    private void updateSet(BlueMapMap map, String id, MarkerSet set) {
+        if (set.getMarkers().isEmpty()) {
+            map.getMarkerSets().remove(id);
         } else {
-            map.getMarkerSets().remove("labels");
+            map.getMarkerSets().put(id, set);
         }
     }
 
-    private void parseAndAddMarkers(MarkerSet areas, MarkerSet labels) {
+    private void parseAndAddMarkers(MarkerSet areas, MarkerSet labels,
+                                    MarkerSet roads, MarkerSet seaRoutes, MarkerSet airRoutes) {
         try {
             List<Map<String, Object>> items = parseItems(cachedJson);
             for (Map<String, Object> item : items) {
-                String type = (String) item.get("type");
-                if ("area".equals(type)) {
-                    addAreaMarker(areas, item);
-                } else if ("text".equals(type)) {
-                    addTextMarker(labels, item);
+                try {
+                    String type = (String) item.get("type");
+                    if ("area".equals(type)) {
+                        addAreaMarker(areas, item);
+                    } else if ("text".equals(type)) {
+                        addTextMarker(labels, item);
+                    } else if ("road".equals(type)) {
+                        addRouteMarker(roads, item, "road");
+                    } else if ("sea".equals(type)) {
+                        addRouteMarker(seaRoutes, item, "sea");
+                    } else if ("air".equals(type)) {
+                        addRouteMarker(airRoutes, item, "air");
+                    }
+                } catch (RuntimeException error) {
+                    BlueMapMarkerTool.LOGGER.warn("[BlueMapMarkerTool] Skipping invalid marker entry", error);
                 }
             }
         } catch (Exception e) {
@@ -205,6 +225,64 @@ public class MarkerStore {
         marker.setStyleClasses(List.of("xyn-text-marker"));
         marker.setListed(true);
         marker.setMinDistance(minDist);
+        if (maxDist > 0) marker.setMaxDistance(maxDist);
+        set.getMarkers().put(id, marker);
+    }
+
+    private void addRouteMarker(MarkerSet set, Map<String, Object> item, String type) {
+        String id = (String) item.getOrDefault("id", "marker");
+        String title = (String) item.getOrDefault("title", "");
+        String subtitle = (String) item.getOrDefault("subtitle", "");
+        String fallbackColor = switch (type) {
+            case "road" -> "#efa53a";
+            case "sea" -> "#259cfa";
+            case "air" -> "#bf85f7";
+            default -> "#ffffff";
+        };
+        String fallbackLabel = switch (type) {
+            case "road" -> "Road";
+            case "sea" -> "Sea Route";
+            case "air" -> "Air Route";
+            default -> "Route";
+        };
+        int defaultWidth = switch (type) {
+            case "road" -> 5;
+            case "sea" -> 4;
+            default -> 3;
+        };
+        String colorHex = (String) item.getOrDefault("color", fallbackColor);
+        double defaultY = toDouble(item.getOrDefault("y", 64.0));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rawPts = (List<Map<String, Object>>) item.get("points");
+        if (rawPts == null || rawPts.size() < 2) return;
+
+        List<Vector3d> points = new ArrayList<>();
+        for (Map<String, Object> point : rawPts) {
+            double x = toDouble(point.get("x"));
+            double y = point.containsKey("y") ? toDouble(point.get("y")) : defaultY;
+            double z = toDouble(point.get("z"));
+            if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
+                return;
+            }
+            points.add(new Vector3d(x, y, z));
+        }
+
+        int[] rgb = hexToRgb(colorHex);
+        String label = title.isBlank() ? fallbackLabel : title;
+        LineMarker marker = new LineMarker(label, new Line(points));
+        String safeTitle = escapeHtml(title);
+        String safeSubtitle = escapeHtml(subtitle);
+        marker.setDetail(safeTitle + (safeSubtitle.isEmpty() ? "" : "<br><i>" + safeSubtitle + "</i>"));
+        marker.setLineColor(new Color(rgb[0], rgb[1], rgb[2], 1f));
+        marker.setLineWidth(Math.max(1, Math.min(30, (int) Math.round(
+            toDouble(item.getOrDefault("lineWidth", defaultWidth))))));
+        marker.setDepthTestEnabled(false);
+        marker.setListed(true);
+
+        double minDist = toDouble(item.getOrDefault("minDist", 0.0));
+        double maxDist = toDouble(item.getOrDefault("maxDist", 0.0));
+        marker.setMinDistance(Math.max(0, minDist));
         if (maxDist > 0) marker.setMaxDistance(maxDist);
         set.getMarkers().put(id, marker);
     }

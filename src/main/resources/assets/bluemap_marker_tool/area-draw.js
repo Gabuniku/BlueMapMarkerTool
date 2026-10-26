@@ -134,8 +134,15 @@
     function isWaypointType(type) { return isRoute(type) || type === "fairway"; }
     function isOpenLine(item) { return isRoute(item.type) || (item.type === "fairway" && item.geometry !== "polygon"); }
     function fairwayShape(item) {
-      if (item.geometry === "polygon") return item.points;
-      return window.XYNFairwayGeometry?.corridorPolygon(item.points, item.width) || [];
+      const geometry = window.XYNFairwayGeometry;
+      if (!geometry || !Array.isArray(item.points)) return [];
+      if (item.geometry === "polygon") {
+        return item.points.length >= 3 && !geometry.hasSelfIntersection(item.points)
+          ? item.points : [];
+      }
+      const width = Number(item.width ?? 40);
+      if (!Number.isFinite(width) || width <= 0) return [];
+      return geometry.corridorPolygon(item.points, Math.min(4096, width));
     }
 
     function heightAt(point, item) {

@@ -372,13 +372,44 @@
     const $ = (id) => P.querySelector("#" + id);
 
     function newItem(type) {
+      const route = ROUTE_TYPES[type];
+      const label = route ? "New " + route.name : (type === "area" ? "New Area" : "New Label");
       const it = {
-        id: uid(), type, title: type === "area" ? "New Area" : "New Label", subtitle: "",
-        color: type === "area" ? "#4caf50" : "#ffffff", y: 64, points: []
+        id: uid(), type, title: label, subtitle: "",
+        color: route ? route.color : (type === "area" ? "#4caf50" : "#ffffff"),
+        y: route ? route.defaultY : 64, points: []
       };
       if (type === "area") it.fill = 0.25;
       else { it.minDist = 0; it.maxDist = 0; }
-      model.items.push(it); sel = it; mode = "draw"; persist(); refresh();
+      if (route) it.lineWidth = route.width;
+      model.items.push(it);
+      sel = it; mode = "draw";
+      persist(); preview(); refresh();
+    }
+
+    function routePointEditorHtml(item) {
+      if (!isRoute(item.type)) return "";
+      const width = Math.max(1, Math.min(30, Number(item.lineWidth) || ROUTE_TYPES[item.type].width));
+      const points = item.points.map((p, idx) => {
+        let html = '<div style="display:flex;align-items:center;gap:3px;margin:4px 0">';
+        html += '<span style="min-width:18px;color:#9ab">' + (idx + 1) + '</span>';
+        for (const axis of ["x", "y", "z"]) {
+          const val = axis === "y" ? heightAt(p, item) : Number(p[axis]) || 0;
+          html += '<label style="font-size:10px;min-width:0;flex:1">' + axis.toUpperCase() +
+            '<input data-route-idx="' + idx + '" data-route-axis="' + axis +
+            '" type="number" step="1" value="' + val +
+            '" style="width:100%;box-sizing:border-box;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"></label>';
+        }
+        html += '<button data-route-up="' + idx + '" title="Move waypoint up">↑</button>';
+        html += '<button data-route-down="' + idx + '" title="Move waypoint down">↓</button>';
+        html += '<button data-route-del="' + idx + '" title="Delete waypoint">×</button>';
+        return html + "</div>";
+      }).join("");
+      return '<div style="border-top:1px solid #333;padding-top:6px;margin-bottom:7px">' +
+        '<label>Line width (px) <input id="xWidth" type="number" min="1" max="30" step="1" value="' + width +
+        '" style="width:55px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"></label>' +
+        '<div style="font-size:11px;color:#9ab;margin-top:6px">Waypoints (X / Y / Z). Order defines the route.</div>' +
+        '<div style="max-height:170px;overflow:auto">' + points + '</div></div>';
     }
 
     function refresh() {
@@ -391,6 +422,11 @@
             <button id="xNewArea" style="flex:1;background:#396;color:#fff;border:0;border-radius:6px;padding:7px;cursor:pointer">▰ New Area</button>
             <button id="xNewText" style="flex:1;background:#37c;color:#fff;border:0;border-radius:6px;padding:7px;cursor:pointer">T New Text</button>
           </div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <button id="xNewRoad" style="flex:1;background:#8a5a20;color:#fff;border:0;border-radius:6px;padding:7px 2px;cursor:pointer">Road</button>
+            <button id="xNewSea" style="flex:1;background:#136bac;color:#fff;border:0;border-radius:6px;padding:7px 2px;cursor:pointer">Sea Route</button>
+            <button id="xNewAir" style="flex:1;background:#764aad;color:#fff;border:0;border-radius:6px;padding:7px 2px;cursor:pointer">Air Route</button>
+          </div>
           <div id="xEdit"></div>
           <div style="font-size:12px;margin:6px 0 3px;color:#9ab">Markers</div>
           <div id="xList" style="max-height:150px;overflow:auto;font-size:12px"></div>
@@ -400,6 +436,9 @@
       $("xMin").onclick = () => { const b = $("xBody"); b.style.display = b.style.display === "none" ? "" : "none"; };
       $("xNewArea").onclick = () => newItem("area");
       $("xNewText").onclick = () => newItem("text");
+      $("xNewRoad").onclick = () => newItem("road");
+      $("xNewSea").onclick = () => newItem("sea");
+      $("xNewAir").onclick = () => newItem("air");
       $("xExport").onclick = exportConfig;
 
       const E = $("xEdit");
@@ -407,12 +446,12 @@
         const isArea = sel.type === "area";
         E.innerHTML = `
           <div style="border:1px solid #333;border-radius:8px;padding:8px;margin-bottom:6px">
-            <div style="font-size:11px;color:#9ab;margin-bottom:4px">${isArea ? "AREA" : "TEXT"}</div>
+            <div style="font-size:11px;color:#9ab;margin-bottom:4px">${isArea ? "AREA" : isRoute(sel.type) ? ROUTE_TYPES[sel.type].name.toUpperCase() : "TEXT"}</div>
             <input id="xTitle" placeholder="Title (e.g. Xynovia)" value="${(sel.title || "").replace(/"/g, "&quot;")}" style="width:100%;box-sizing:border-box;margin-bottom:5px;background:#111;color:#eee;border:1px solid #444;border-radius:5px;padding:6px">
             <input id="xSub" placeholder="Subtitle (e.g. Claimed by Xywren)" value="${(sel.subtitle || "").replace(/"/g, "&quot;")}" style="width:100%;box-sizing:border-box;margin-bottom:6px;background:#111;color:#eee;border:1px solid #444;border-radius:5px;padding:6px">
             <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
-              <label>${isArea ? "Colour" : "Text"} <input id="xColor" type="color" value="${sel.color}" style="vertical-align:middle"></label>
-              <label style="flex:1">Y <input id="xY" type="number" value="${sel.y}" style="width:56px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"></label>
+              <label>${isArea ? "Colour" : isRoute(sel.type) ? "Line" : "Text"} <input id="xColor" type="color" value="${sel.color}" style="vertical-align:middle"></label>
+              <label style="flex:1">${isRoute(sel.type) ? "Next Y" : "Y"} <input id="xY" type="number" value="${sel.y}" style="width:56px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"></label>
             </div>
             ${isArea ? `<label style="display:block;margin-bottom:6px">Fill <input id="xFill" type="range" min="0" max="0.8" step="0.05" value="${sel.fill}" style="vertical-align:middle;width:130px"></label>` : `
             <div style="border-top:1px solid #333;padding-top:6px;margin-bottom:6px">
@@ -420,12 +459,13 @@
               <label style="display:block;margin-bottom:4px">Min dist <input id="xMinD" type="number" value="${sel.minDist || 0}" style="width:80px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"> <button id="xSetMin" style="background:#444;color:#fff;border:0;border-radius:4px;padding:3px 6px;cursor:pointer">use current</button></label>
               <label style="display:block">Max dist <input id="xMaxD" type="number" value="${sel.maxDist || 0}" style="width:80px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"> <span style="color:#889;font-size:11px">(0 = no limit)</span></label>
             </div>`}
+            ${routePointEditorHtml(sel)}
             <div style="display:flex;gap:6px">
-              <button id="xDraw" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "draw" ? "#396" : "#444"};color:#fff">${isArea ? "✚ Draw" : "✚ Place"}</button>
-              <button id="xEditM" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "edit" ? "#396" : "#444"};color:#fff">${isArea ? "✎ Edit" : "✎ Move"}</button>
+              <button id="xDraw" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "draw" ? "#396" : "#444"};color:#fff">${isArea ? "✚ Draw" : isRoute(sel.type) ? "✚ Points" : "✚ Place"}</button>
+              <button id="xEditM" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "edit" ? "#396" : "#444"};color:#fff">${isArea ? "✎ Edit" : isRoute(sel.type) ? "✎ Path" : "✎ Move"}</button>
               <button id="xDone" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:#444;color:#fff">✓ Done</button>
             </div>
-            <div style="font-size:11px;color:#889;margin-top:5px">${sel.points.length} point${sel.points.length === 1 ? "" : "s"}${mode === "draw" ? (isArea ? " · click map to add corners" : " · click map to place") : mode === "edit" ? (isArea ? " · drag/insert · dbl-click to delete" : " · drag to move") : ""}</div>
+            <div style="font-size:11px;color:#889;margin-top:5px">${sel.points.length} point${sel.points.length === 1 ? "" : "s"}${mode === "draw" ? (isArea ? " · click map to add corners" : isRoute(sel.type) ? " · click map to add waypoints (2+)" : " · click map to place") : mode === "edit" ? (isArea || isRoute(sel.type) ? " · drag/insert · dbl-click to delete" : " · drag to move") : ""}</div>
           </div>`;
         const on = (id, ev, fn) => { const el = $(id); if (el) el[ev] = fn; };
         on("xTitle", "oninput", (e) => { sel.title = e.target.value; persist(); preview(); renderList(); });
@@ -436,6 +476,40 @@
         on("xMinD", "onchange", (e) => { sel.minDist = parseInt(e.target.value) || 0; persist(); preview(); });
         on("xMaxD", "onchange", (e) => { sel.maxDist = parseInt(e.target.value) || 0; persist(); preview(); });
         on("xSetMin", "onclick", () => { sel.minDist = viewDistance(); persist(); preview(); refresh(); });
+        if (isRoute(sel.type)) {
+          on("xWidth", "onchange", (e) => {
+            sel.lineWidth = Math.max(1, Math.min(30, Math.round(Number(e.target.value) || ROUTE_TYPES[sel.type].width)));
+            e.target.value = sel.lineWidth;
+            persist(); preview();
+          });
+          E.querySelectorAll("[data-route-axis]").forEach((input) => {
+            input.onchange = () => {
+              const idx = Number(input.dataset.routeIdx);
+              const axis = input.dataset.routeAxis;
+              if (!sel.points[idx] || !["x", "y", "z"].includes(axis)) return;
+              const n = Number(input.value);
+              if (!Number.isFinite(n)) return;
+              sel.points[idx][axis] = n;
+              persist(); preview();
+            };
+          });
+          for (const action of ["up", "down", "del"]) {
+            E.querySelectorAll("[data-route-" + action + "]").forEach((btn) => {
+              btn.onclick = () => {
+                const i = Number(btn.dataset["route" + action[0].toUpperCase() + action.slice(1)]);
+                if (!Number.isInteger(i) || !sel.points[i]) return;
+                if (action === "del") sel.points.splice(i, 1);
+                else {
+                  const j = i + (action === "up" ? -1 : 1);
+                  if (j < 0 || j >= sel.points.length) return;
+                  [sel.points[i], sel.points[j]] = [sel.points[j], sel.points[i]];
+                }
+                persist(); preview(); refresh();
+              };
+            });
+          }
+        }
+
         on("xDraw", "onclick", () => { mode = "draw"; refresh(); });
         on("xEditM", "onclick", () => { mode = "edit"; refresh(); });
         on("xDone", "onclick", () => { mode = "idle"; refresh(); });
@@ -449,9 +523,9 @@
         `<div data-id="${it.id}" style="display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;cursor:pointer;background:${sel && sel.id === it.id ? "#2a3340" : "transparent"}">
           <span style="width:11px;height:11px;border-radius:${it.type === "area" ? "2px" : "50%"};background:${it.color};display:inline-block;border:1px solid #0006"></span>
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.title)}</span>
-          <span style="color:#789;font-size:11px">${it.type === "area" ? "Area" : "Text"}</span>
+          <span style="color:#789;font-size:11px">${it.type === "area" ? "Area" : isRoute(it.type) ? ROUTE_TYPES[it.type].name : "Text"}</span>
           <span data-del="${it.id}" style="color:#f88;cursor:pointer">✕</span>
-        </div>`).join("") || '<i style="color:#778">Nothing yet — add an Area or Text.</i>';
+        </div>`).join("") || '<i style="color:#778">Nothing yet — add an Area, Text, or Route.</i>';
       L.querySelectorAll("[data-id]").forEach((el) => el.onclick = (ev) => {
         if (ev.target.dataset.del) return;
         sel = model.items.find((a) => a.id === el.dataset.id); mode = "idle"; refresh();

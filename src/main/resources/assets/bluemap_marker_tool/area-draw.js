@@ -231,9 +231,9 @@
     function drawOverlay() {
       while (svg.firstChild) svg.removeChild(svg.firstChild);
       if (!sel || mode === "idle") return;
-      const scr = sel.points.map((p) => worldToScreen(p.x, p.z, sel.y));
-      if (sel.type === "area" && scr.length > 1) {
-        const poly = document.createElementNS(NS, mode === "edit" ? "polygon" : "polyline");
+      const scr = sel.points.map((p) => worldToScreen(p.x, p.z, isRoute(sel.type) ? heightAt(p, sel) : sel.y));
+      if ((sel.type === "area" || isRoute(sel.type)) && scr.length > 1) {
+        const poly = document.createElementNS(NS, mode === "edit" && sel.type === "area" ? "polygon" : "polyline");
         poly.setAttribute("points", scr.map((s) => s.x + "," + s.y).join(" "));
         poly.setAttribute("fill", "none"); poly.setAttribute("stroke", "#fff");
         poly.setAttribute("stroke-dasharray", "5 4"); poly.setAttribute("stroke-width", "1.5");
@@ -246,7 +246,7 @@
         svg.appendChild(c);
       });
     }
-    (function loop() { drawOverlay(); renderLabels(); requestAnimationFrame(loop); })();
+    (function loop() { drawOverlay(); requestAnimationFrame(loop); })();
 
     // ---- hover tooltip ----
     function pointInPoly(px, py, poly) {
@@ -262,12 +262,13 @@
       let hit = null;
       for (let k = model.items.length - 1; k >= 0; k--) {
         const it = model.items[k];
-        if (it.type !== "area" || it.points.length < 3) continue;
+        if (it.type !== "area" || it.points.length < 3 || (!String(it.title || "").trim() && !String(it.subtitle || "").trim())) continue;
         const scr = it.points.map((p) => worldToScreen(p.x, p.z, it.y));
         if (pointInPoly(e.clientX, e.clientY, scr)) { hit = it; break; }
       }
       if (hit) {
-        tip.querySelector(".t").textContent = hit.title;
+        tip.querySelector(".t").textContent = hit.title || "";
+        tip.querySelector(".t").style.display = String(hit.title || "").trim() ? "" : "none";
         tip.querySelector(".s").textContent = hit.subtitle || "";
         tip.querySelector(".s").style.display = hit.subtitle ? "" : "none";
         tip.style.left = e.clientX + "px"; tip.style.top = e.clientY + "px"; tip.style.display = "block";
@@ -279,7 +280,7 @@
     function nearestVertex(cx, cy) {
       if (!sel) return -1;
       let best = -1, bd = 12;
-      sel.points.forEach((p, i) => { const s = worldToScreen(p.x, p.z, sel.y); const d = Math.hypot(s.x - cx, s.y - cy); if (d < bd) { bd = d; best = i; } });
+      sel.points.forEach((p, i) => { const s = worldToScreen(p.x, p.z, isRoute(sel.type) ? heightAt(p, sel) : sel.y); const d = Math.hypot(s.x - cx, s.y - cy); if (d < bd) { bd = d; best = i; } });
       return best;
     }
     function onDown(e) {
@@ -288,7 +289,14 @@
       if (mode === "edit") { const vi = nearestVertex(e.clientX, e.clientY); if (vi >= 0) { dragIdx = vi; e.stopPropagation(); e.preventDefault(); } }
     }
     function onMove(e) {
-      if (dragIdx >= 0 && sel) { sel.points[dragIdx] = screenToWorld(e.clientX, e.clientY, sel.y); preview(); e.stopPropagation(); }
+      if (dragIdx >= 0 && sel) {
+        const old = sel.points[dragIdx];
+        const y = isRoute(sel.type) ? heightAt(old, sel) : sel.y;
+        const pos = screenToWorld(e.clientX, e.clientY, y);
+        sel.points[dragIdx] = isRoute(sel.type) ? { x: pos.x, y, z: pos.z } : pos;
+        preview();
+        e.stopPropagation();
+      }
     }
     function onUp(e) {
       if (dragIdx >= 0) { dragIdx = -1; persist(); refresh(); e.stopPropagation(); downXY = null; return; }
@@ -297,20 +305,29 @@
       if (moved > 6 || e.target !== getCanvas() || !sel) return;
       if (mode === "draw") {
         if (sel.type === "text") { sel.points = [screenToWorld(e.clientX, e.clientY, sel.y)]; mode = "idle"; }
-        else sel.points.push(screenToWorld(e.clientX, e.clientY, sel.y));
-      } else if (mode === "edit" && sel.type === "area") insertVertexNear(e.clientX, e.clientY);
+        else {
+          const pos = screenToWorld(e.clientX, e.clientY, sel.y);
+          sel.points.push(isRoute(sel.type) ? { x: pos.x, y: sel.y, z: pos.z } : pos);
+        }
+      } else if (mode === "edit" && (sel.type === "area" || isRoute(sel.type))) insertVertexNear(e.clientX, e.clientY);
       persist(); preview(); refresh();
     }
     function insertVertexNear(cx, cy) {
-      if (sel.points.length < 2) { sel.points.push(screenToWorld(cx, cy, sel.y)); return; }
-      let bestI = 0, bd = Infinity;
-      for (let i = 0; i < sel.points.length; i++) {
-        const a = worldToScreen(sel.points[i].x, sel.points[i].z, sel.y);
-        const b = worldToScreen(sel.points[(i + 1) % sel.points.length].x, sel.points[(i + 1) % sel.points.length].z, sel.y);
+      if (sel.points.length < 2) return;
+      let bestI = -1, bd = isRoute(sel.type) ? 24 : Infinity;
+      const segments = isRoute(sel.type) ? sel.points.length - 1 : sel.points.length;
+      for (let i = 0; i < segments; i++) {
+        const p0 = sel.points[i], p1 = sel.points[(i + 1) % sel.points.length];
+        const a = worldToScreen(p0.x, p0.z, isRoute(sel.type) ? heightAt(p0, sel) : sel.y);
+        const b = worldToScreen(p1.x, p1.z, isRoute(sel.type) ? heightAt(p1, sel) : sel.y);
         const d = distToSeg(cx, cy, a.x, a.y, b.x, b.y);
         if (d < bd) { bd = d; bestI = i; }
       }
-      sel.points.splice(bestI + 1, 0, screenToWorld(cx, cy, sel.y));
+      if (bestI < 0) return;
+      const p0 = sel.points[bestI], p1 = sel.points[(bestI + 1) % sel.points.length];
+      const midY = isRoute(sel.type) ? Math.round((heightAt(p0, sel) + heightAt(p1, sel)) / 2) : sel.y;
+      const pos = screenToWorld(cx, cy, midY);
+      sel.points.splice(bestI + 1, 0, isRoute(sel.type) ? { x: pos.x, y: midY, z: pos.z } : pos);
     }
     function distToSeg(px, py, x1, y1, x2, y2) {
       const dx = x2 - x1, dy = y2 - y1, l2 = dx * dx + dy * dy;
@@ -324,7 +341,7 @@
       cv.addEventListener("pointerup", onUp, true);
       cv.addEventListener("pointermove", onHover, false);
       cv.addEventListener("dblclick", (e) => {
-        if (mode !== "edit" || !sel || sel.type !== "area") return;
+        if (mode !== "edit" || !sel || (sel.type !== "area" && !isRoute(sel.type))) return;
         const vi = nearestVertex(e.clientX, e.clientY);
         if (vi >= 0) { sel.points.splice(vi, 1); persist(); preview(); refresh(); e.stopPropagation(); e.preventDefault(); }
       }, true);

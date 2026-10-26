@@ -26,6 +26,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
+      - name: Test marker editor
+        run: |
+          node --check src/main/resources/assets/bluemap_marker_tool/area-draw.js
+          node tests/editor-smoke.cjs
+
       - name: Build with Gradle
         run: ./gradlew clean jar --no-daemon
 

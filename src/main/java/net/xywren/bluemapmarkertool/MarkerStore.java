@@ -366,7 +366,8 @@ public class MarkerStore {
         double fallbackY = toDouble(item.getOrDefault("y", 64));
         for (int i = 0; i < raw.size(); i++) {
             Map<String, Object> point = raw.get(i);
-            String name = String.valueOf(point.getOrDefault("name", "")).trim();
+            Object rawName = point.get("name");
+            String name = rawName instanceof String str ? str.trim() : "";
             if (name.isEmpty()) continue;
 
             double x = toDouble(point.get("x"));
@@ -401,83 +402,25 @@ public class MarkerStore {
             .replace("'", "&#39;");
     }
 
+    /**
+     * Parse the shared markers document as real JSON. In particular, waypoint
+     * names and marker titles may contain escaped quotes, Unicode or backslashes.
+     */
     private List<Map<String, Object>> parseItems(String json) {
-        int start = json.indexOf("\"items\"");
-        if (start < 0) return Collections.emptyList();
-        int arrStart = json.indexOf('[', start);
-        if (arrStart < 0) return Collections.emptyList();
-        int arrEnd = matchingBracket(json, arrStart, '[', ']');
-        if (arrEnd < 0) return Collections.emptyList();
-        String arrStr = json.substring(arrStart + 1, arrEnd).trim();
-        return parseObjectArray(arrStr);
-    }
+        JsonElement parsed = JsonParser.parseString(json);
+        if (!parsed.isJsonObject()) return List.of();
+        JsonObject root = parsed.getAsJsonObject();
+        JsonElement entries = root.get("items");
+        if (entries == null || !entries.isJsonArray()) return List.of();
+        JsonArray array = entries.getAsJsonArray();
 
-    private List<Map<String, Object>> parseObjectArray(String s) {
-        List<Map<String, Object>> result = new ArrayList<>();
-        int i = 0;
-        while (i < s.length()) {
-            int objStart = s.indexOf('{', i);
-            if (objStart < 0) break;
-            int objEnd = matchingBracket(s, objStart, '{', '}');
-            if (objEnd < 0) break;
-            result.add(parseObject(s.substring(objStart + 1, objEnd)));
-            i = objEnd + 1;
-        }
-        return result;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> parseObject(String s) {
-        Map<String, Object> map = new LinkedHashMap<>();
-        int i = 0;
-        while (i < s.length()) {
-            int kq = s.indexOf('"', i); if (kq < 0) break;
-            int kq2 = s.indexOf('"', kq + 1); if (kq2 < 0) break;
-            String key = s.substring(kq + 1, kq2);
-            int colon = s.indexOf(':', kq2 + 1); if (colon < 0) break;
-            i = colon + 1;
-            while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
-            if (i >= s.length()) break;
-            char c = s.charAt(i);
-            if (c == '"') {
-                int vq2 = s.indexOf('"', i + 1); if (vq2 < 0) break;
-                map.put(key, s.substring(i + 1, vq2));
-                i = vq2 + 1;
-            } else if (c == '{') {
-                int end = matchingBracket(s, i, '{', '}'); if (end < 0) break;
-                map.put(key, parseObject(s.substring(i + 1, end)));
-                i = end + 1;
-            } else if (c == '[') {
-                int end = matchingBracket(s, i, '[', ']'); if (end < 0) break;
-                String inner = s.substring(i + 1, end).trim();
-                if (inner.startsWith("{")) map.put(key, parseObjectArray(inner));
-                else map.put(key, inner);
-                i = end + 1;
-            } else {
-                int end = i;
-                while (end < s.length() && s.charAt(end) != ',' && s.charAt(end) != '}') end++;
-                String val = s.substring(i, end).trim();
-                if ("true".equals(val)) map.put(key, Boolean.TRUE);
-                else if ("false".equals(val)) map.put(key, Boolean.FALSE);
-                else if ("null".equals(val)) map.put(key, null);
-                else { try { map.put(key, Double.parseDouble(val)); } catch (NumberFormatException ignored) { map.put(key, val); } }
-                i = end;
+        List<Map<String, Object>> items = new ArrayList<>(array.size());
+        for (JsonElement element : array) {
+            if (element != null && element.isJsonObject()) {
+                items.add(GSON.fromJson(element, ITEM_TYPE));
             }
         }
-        return map;
-    }
-
-    private int matchingBracket(String s, int open, char openCh, char closeCh) {
-        int depth = 0;
-        boolean inStr = false;
-        for (int i = open; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '"' && (i == 0 || s.charAt(i - 1) != '\\')) inStr = !inStr;
-            if (inStr) continue;
-            if (c == openCh) depth++;
-            else if (c == closeCh) { depth--; if (depth == 0) return i; }
-        }
-        return -1;
+        return items;
     }
 
     private double toDouble(Object v) {

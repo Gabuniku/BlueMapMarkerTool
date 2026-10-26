@@ -330,7 +330,7 @@
     function newItem(type) {
       const it = {
         id: uid(), type, title: type === "area" ? "New Area" : type === "fairway" ? "New Fairway" : type === "route" ? "New Route" : "New Label", subtitle: "",
-        color: type === "area" ? "#4caf50" : "#ffffff", y: 64, points: []
+        color: type === "area" ? "#4caf50" : type === "fairway" || type === "route" ? "#00bfff" : "#ffffff", y: 64, points: []
       };
       if (type === "area") it.fill = 0.25;
       else if (type === "fairway") { it.geometry = "corridor"; it.width = 40; it.fill = 0.25; }

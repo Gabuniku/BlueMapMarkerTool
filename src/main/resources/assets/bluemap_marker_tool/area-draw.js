@@ -99,7 +99,8 @@
     function uid() { return "m" + Math.random().toString(36).slice(2, 8); }
     function slug(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
     function hex2rgb(h) { return { r: parseInt(h.slice(1, 3), 16), g: parseInt(h.slice(3, 5), 16), b: parseInt(h.slice(5, 7), 16) }; }
-    function esc(s) { return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+    function esc(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+    function escAttr(s) { return esc(s).replace(/"/g, "&quot;").replace(/\x27/g, "&#39;"); }
 
     // ---- coordinate transforms ----
     function screenToWorld(cx, cy, y) {
@@ -422,27 +423,43 @@
 
     function newItem(type) {
       const route = ROUTE_TYPES[type];
-      const label = route ? "New " + route.name : (type === "area" ? "New Area" : "New Label");
+      const isFairway = type === "fairway";
+      const label = route ? "New " + route.name : isFairway ? "New Fairway" : type === "area" ? "New Area" : "New Label";
       const it = {
         id: uid(), type, title: label, subtitle: "",
-        color: route ? route.color : (type === "area" ? "#4caf50" : "#ffffff"),
-        y: route ? route.defaultY : 64, points: []
+        color: route ? route.color : isFairway ? "#00bfff" : type === "area" ? "#4caf50" : "#ffffff",
+        y: route ? route.defaultY : isFairway ? 64 : 64, points: []
       };
-      if (type === "area") it.fill = 0.25;
-      else { it.minDist = 0; it.maxDist = 0; }
+      if (type === "area" || isFairway) it.fill = 0.25;
+      if (type === "text" || route) { it.minDist = 0; it.maxDist = 0; }
       if (route) it.lineWidth = route.width;
+      if (isFairway) { it.geometry = "corridor"; it.width = 40; }
       model.items.push(it);
       sel = it; mode = "draw";
       persist(); preview(); refresh();
     }
 
     function routePointEditorHtml(item) {
-      if (!isRoute(item.type)) return "";
-      const width = Math.max(1, Math.min(30, Number(item.lineWidth) || ROUTE_TYPES[item.type].width));
+      if (!isWaypointType(item.type)) return "";
+      const route = ROUTE_TYPES[item.type];
+      let options = "";
+      if (route) {
+        const width = Math.max(1, Math.min(30, Number(item.lineWidth) || route.width));
+        options = '<label>Line width (px) <input id="xWidth" type="number" min="1" max="30" step="1" value="' + width +
+          '" style="width:65px;background:#111;color:#eee;border:1px solid #444;padding:3px"></label>';
+      } else {
+        const corridor = item.geometry !== "polygon";
+        options = '<label>Fairway shape <select id="xGeometry" style="background:#111;color:#eee;border:1px solid #444;padding:3px">' +
+          '<option value="corridor"' + (corridor ? " selected" : "") + '>Centerline + width</option>' +
+          '<option value="polygon"' + (!corridor ? " selected" : "") + '>Polygon</option></select></label>' +
+          (corridor ? '<label style="display:block;margin-top:5px">Width (blocks) <input id="xFairwayWidth" type="number" min="1" step="1" value="' +
+            (Number(item.width) || 40) +
+            '" style="width:75px;background:#111;color:#eee;border:1px solid #444;padding:3px"></label>' : "");
+      }
       const points = item.points.map((p, idx) => {
-        let html = '<div style="display:flex;align-items:center;gap:3px;margin:4px 0">';
-        html += '<span style="min-width:18px;color:#9ab">' + (idx + 1) + '</span>';
-        for (const axis of ["x", "y", "z"]) {
+        let html = '<div style="border-bottom:1px solid #333;padding:4px 0">';
+        html += '<div style="display:flex;align-items:center;gap:3px"><span style="width:18px;color:#9ab">' + (idx + 1) + '</span>';
+        for (const axis of (route ? ["x", "y", "z"] : ["x", "z"])) {
           const val = axis === "y" ? heightAt(p, item) : Number(p[axis]) || 0;
           html += '<label style="font-size:10px;min-width:0;flex:1">' + axis.toUpperCase() +
             '<input data-route-idx="' + idx + '" data-route-axis="' + axis +
@@ -451,14 +468,21 @@
         }
         html += '<button data-route-up="' + idx + '" title="Move waypoint up">↑</button>';
         html += '<button data-route-down="' + idx + '" title="Move waypoint down">↓</button>';
-        html += '<button data-route-del="' + idx + '" title="Delete waypoint">×</button>';
+        html += '<button data-route-del="' + idx + '" title="Delete waypoint">×</button></div>';
+        html += '<label style="display:block;margin:4px 0 0 18px;font-size:11px;color:#9ab">Name ' +
+          '<input data-route-name="' + idx + '" placeholder="Optional waypoint name" value="' +
+          escAttr(p.name || "") +
+          '" style="width:75%;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"></label>';
         return html + "</div>";
       }).join("");
       return '<div style="border-top:1px solid #333;padding-top:6px;margin-bottom:7px">' +
-        '<label>Line width (px) <input id="xWidth" type="number" min="1" max="30" step="1" value="' + width +
-        '" style="width:55px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"></label>' +
-        '<div style="font-size:11px;color:#9ab;margin-top:6px">Waypoints (X / Y / Z). Order defines the route.</div>' +
-        '<div style="max-height:170px;overflow:auto">' + points + '</div></div>';
+        options +
+        '<div style="font-size:11px;color:#9ab;margin-top:6px">Waypoints (' +
+        (route ? "X / Y / Z" : "X / Z") + '). Order defines the path.</div>' +
+        '<div style="max-height:180px;overflow:auto">' + points + '</div>' +
+        (item.type === "fairway" && item.geometry !== "polygon" && item.points.length >= 2 && !fairwayShape(item).length ?
+          '<div style="color:#f99;font-size:11px">Invalid corridor shape: simplify the bend or use Polygon.</div>' : "") +
+        '</div>';
     }
 
     function refresh() {

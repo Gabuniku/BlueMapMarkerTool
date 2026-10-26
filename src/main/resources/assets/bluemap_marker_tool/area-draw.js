@@ -547,7 +547,7 @@
       if (areas.length) {
         out += `  areas: {\n    label: "Areas"\n    toggleable: true\n    markers: {\n`;
         areas.forEach((a) => {
-          const c = hex2rgb(a.color); const ct = centroid(a.points); const id = slug(a.title) || a.id;
+          const c = hex2rgb(a.color); const ct = bboxCenter(a.points.map(p => ({ x: Number(p.x) || 0, y: Number(a.y) || 64, z: Number(p.z) || 0 }))); const id = slug(a.title) || a.id;
           const detail = esc(a.title) + (a.subtitle ? "<br>" + esc(a.subtitle) : "");
           out += `      ${id}: {\n        type: "shape"\n        label: "${a.title.replace(/"/g, '\\"')}"\n        detail: "${detail.replace(/"/g, '\\"')}"\n        position: { x: ${ct.x}, y: ${a.y}, z: ${ct.z} }\n        shape: [\n${a.points.map((p) => `          { x: ${p.x}, z: ${p.z} }`).join("\n")}\n        ]\n        shape-y: ${a.y}\n        line-width: 3\n        line-color: { r: ${c.r}, g: ${c.g}, b: ${c.b}, a: 1.0 }\n        fill-color: { r: ${c.r}, g: ${c.g}, b: ${c.b}, a: ${a.fill} }\n        depth-test: false\n      }\n`;
         });

@@ -28,7 +28,7 @@ class Element {
     if (this.selectorCache[selector]) return this.selectorCache[selector];
     if (!selector.startsWith("[data-route-")) return [];
     const attr = selector.slice(1, -1);
-    const matches = [...this.innerHTML.matchAll(new RegExp(attr + '="(\d+)"', "g"))];
+    const matches = [...this.innerHTML.matchAll(new RegExp(attr + '="(\\d+)"', "g"))];
     const attrKey = attr.slice(5).replace(/-([a-z])/g, (_whole, letter) => letter.toUpperCase());
     const elements = matches.map(match => {
       const input = new Element("input");

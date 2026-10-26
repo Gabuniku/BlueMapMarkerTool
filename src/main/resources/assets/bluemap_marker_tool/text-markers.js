@@ -85,6 +85,24 @@
     return set;
   }
 
+  function buildFairwaySet() {
+    const set = { label: "Fairways", toggleable: true, defaultHidden: false, markers: {} };
+    model.items.forEach(item => {
+      if (!item || item.type !== "fairway") return;
+      const shape = item.geometry === "corridor" ? (window.XYNFairwayGeometry?.corridorPolygon(item.points, item.width) || []) : item.points;
+      if (!Array.isArray(shape) || shape.length < 3) return;
+      const c = hex2rgb(item.color || "#00bfff"), center = shapeCenter(shape), y = Number(item.y) || 64;
+      set.markers[item.id] = {
+        type: "shape", label: item.title || "", detail: esc(item.subtitle || ""),
+        position: { x: center.x, y, z: center.z },
+        shape: shape.map(p => ({ x: Number(p.x), z: Number(p.z) })), shapeY: y,
+        lineWidth: 2, lineColor: { ...c, a: 1 }, fillColor: { ...c, a: Number(item.fill ?? 0.25) },
+        depthTest: false, listed: true
+      };
+    });
+    return set;
+  }
+
   function buildTextSet() {
     const set = {
       label: "Text Labels",
@@ -135,6 +153,7 @@
       removeLegacyAreaSet(manager);
       manager.root.updateMarkerSetFromData("areas", buildAreaSet());
       manager.root.updateMarkerSetFromData("labels", buildTextSet());
+      manager.root.updateMarkerSetFromData("fairways", buildFairwaySet());
     } catch (error) {
       console.warn("BlueMap Marker Tool could not refresh managed markers", error);
     }
@@ -145,9 +164,10 @@
     delete incoming["xyn-areas"];
 
     const keys = Object.keys(incoming);
-    const localAreaPreview = keys.length === 1 && keys[0] === "areas";
+    const localEditorPreview = keys.length > 0 && keys.every(k => k === "areas" || k === "fairways");
 
-    if (!localAreaPreview) incoming.areas = buildAreaSet();
+    if (!localEditorPreview) incoming.areas = buildAreaSet();
+    if (!localEditorPreview) incoming.fairways = buildFairwaySet();
     incoming.labels = buildTextSet();
     return incoming;
   }
@@ -238,5 +258,6 @@
     .catch(() => {});
 
   setInterval(ensureCurrentManager, 100);
+  setInterval(loadModel, 10000);
   ensureCurrentManager();
 })();

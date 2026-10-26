@@ -128,8 +128,15 @@
       sea: { setId: "sea_routes", label: "Sea Routes", name: "Sea Route", color: "#259cfa", width: 4, defaultY: 63 },
       air: { setId: "air_routes", label: "Air Routes", name: "Air Route", color: "#bf85f7", width: 3, defaultY: 160 }
     });
-    const TOOL_SETS = ["areas", "labels", "roads", "sea_routes", "air_routes"];
+    const TOOL_SETS = ["areas", "labels", "roads", "sea_routes", "air_routes", "fairways", "waypoints"];
     function isRoute(type) { return Object.prototype.hasOwnProperty.call(ROUTE_TYPES, type); }
+    function isWaypointType(type) { return isRoute(type) || type === "fairway"; }
+    function isOpenLine(item) { return isRoute(item.type) || (item.type === "fairway" && item.geometry !== "polygon"); }
+    function fairwayShape(item) {
+      if (item.geometry === "polygon") return item.points;
+      return window.XYNFairwayGeometry?.corridorPolygon(item.points, item.width) || [];
+    }
+
     function heightAt(point, item) {
       return point.y !== undefined && Number.isFinite(Number(point.y)) ? Number(point.y) : Number(item.y) || 64;
     }
@@ -149,7 +156,9 @@
     function buildData() {
       const sets = {
         areas: { label: "Areas", toggleable: true, defaultHidden: false, markers: {} },
-        labels: { label: "Text Labels", toggleable: true, defaultHidden: false, markers: {} }
+        labels: { label: "Text Labels", toggleable: true, defaultHidden: false, markers: {} },
+        fairways: { label: "Fairways", toggleable: true, defaultHidden: false, markers: {} },
+        waypoints: { label: "Waypoints", toggleable: true, defaultHidden: true, markers: {} }
       };
       for (const type of Object.keys(ROUTE_TYPES)) {
         const route = ROUTE_TYPES[type];
@@ -187,6 +196,24 @@
           };
           if (Number(it.maxDist) > 0) marker.maxDistance = Number(it.maxDist);
           sets.labels.markers[it.id] = marker;
+        } else if (it.type === "fairway") {
+          const shape = fairwayShape(it);
+          if (shape.length >= 3) {
+            const c = hex2rgb(safeHex(it.color, "#00bfff"));
+            const y = Number(it.y) || 64;
+            const center = bboxCenter(shape.map(p => ({ x: Number(p.x) || 0, y, z: Number(p.z) || 0 })));
+            const title = String(it.title || ""), subtitle = String(it.subtitle || "");
+            sets.fairways.markers[it.id] = {
+              type: "shape", label: title.trim() || "Fairway",
+              detail: esc(title) + (subtitle ? "<br><i>" + esc(subtitle) + "</i>" : ""),
+              position: center,
+              shape: shape.map(p => ({ x: Number(p.x) || 0, z: Number(p.z) || 0 })),
+              shapeY: y, lineWidth: 2,
+              lineColor: { r: c.r, g: c.g, b: c.b, a: 1 },
+              fillColor: { r: c.r, g: c.g, b: c.b, a: Math.max(0, Math.min(1, Number(it.fill ?? 0.25))) },
+              depthTest: false, listed: true
+            };
+          }
         } else if (isRoute(it.type)) {
           if (points.length < 2) continue;
           const route = ROUTE_TYPES[it.type];
@@ -204,6 +231,26 @@
           };
           if (Number(it.maxDist) > 0) marker.maxDistance = Number(it.maxDist);
           sets[route.setId].markers[it.id] = marker;
+        }
+
+        if (isWaypointType(it.type)) {
+          points.forEach((p, index) => {
+            const name = String(p.name || "").trim();
+            if (!name) return;
+            const y = isRoute(it.type) ? heightAt(p, it) : Number(it.y) || 64;
+            const id = String(p.id || index).replace(/[^a-zA-Z0-9_-]/g, "_");
+            const html = '<span style="display:inline-block;transform:translate(-50%,-100%);' +
+              'white-space:nowrap;color:white;background:#123b50df;border:1px solid #85c5e0;' +
+              'border-radius:5px;padding:3px 6px;font:12px system-ui,sans-serif;' +
+              'text-shadow:0 1px 2px #000;pointer-events:none">' +
+              '<span style="color:#a9e3ff">●</span> ' + esc(name) + '</span>';
+            sets.waypoints.markers[String(it.id) + "-wp-" + id] = {
+              type: "html", label: name,
+              position: { x: Number(p.x) || 0, y, z: Number(p.z) || 0 },
+              anchor: { x: 0, y: 0 }, html, classes: [],
+              listed: true, minDistance: 0
+            };
+          });
         }
       }
       return sets;

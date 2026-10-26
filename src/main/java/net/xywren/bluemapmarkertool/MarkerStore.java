@@ -103,8 +103,10 @@ public class MarkerStore {
         areas.setToggleable(true);
         MarkerSet labels = new MarkerSet("Text Labels");
         labels.setToggleable(true);
+        MarkerSet fairways = new MarkerSet("Fairways");
+        fairways.setToggleable(true);
 
-        parseAndAddMarkers(areas, labels);
+        parseAndAddMarkers(areas, labels, fairways);
 
         if (!areas.getMarkers().isEmpty()) {
             map.getMarkerSets().put("areas", areas);
@@ -116,9 +118,11 @@ public class MarkerStore {
         } else {
             map.getMarkerSets().remove("labels");
         }
+        if (!fairways.getMarkers().isEmpty()) map.getMarkerSets().put("fairways", fairways);
+        else map.getMarkerSets().remove("fairways");
     }
 
-    private void parseAndAddMarkers(MarkerSet areas, MarkerSet labels) {
+    private void parseAndAddMarkers(MarkerSet areas, MarkerSet labels, MarkerSet fairways) {
         try {
             List<Map<String, Object>> items = parseItems(cachedJson);
             for (Map<String, Object> item : items) {
@@ -127,6 +131,8 @@ public class MarkerStore {
                     addAreaMarker(areas, item);
                 } else if ("text".equals(type)) {
                     addTextMarker(labels, item);
+                } else if ("fairway".equals(type)) {
+                    addFairwayMarker(fairways, item);
                 }
             }
         } catch (Exception e) {
@@ -168,6 +174,65 @@ public class MarkerStore {
         marker.setDepthTestEnabled(false);
 
         set.getMarkers().put(id, marker);
+    }
+
+    // Widen a centerline into a polygon using offset vectors and bounded miter joins.
+    private List<Vector2d> fairwayPolygon(List<Map<String, Object>> points, double width) {
+        List<Vector2d> clean = new ArrayList<>();
+        if (!Double.isFinite(width) || width <= 0) return clean;
+        for (Map<String, Object> point : points) {
+            double x = toDouble(point.get("x")), z = toDouble(point.get("z"));
+            if (!Double.isFinite(x) || !Double.isFinite(z)) return List.of();
+            Vector2d next = new Vector2d(x, z);
+            if (clean.isEmpty() || next.distance(clean.get(clean.size() - 1)) > 1e-6) clean.add(next);
+        }
+        if (clean.size() < 2) return List.of();
+        List<Vector2d> normals = new ArrayList<>();
+        for (int i = 0; i < clean.size() - 1; i++) {
+            Vector2d delta = clean.get(i + 1).sub(clean.get(i));
+            normals.add(new Vector2d(-delta.getY(), delta.getX()).normalize());
+        }
+        List<Vector2d> left = new ArrayList<>(), right = new ArrayList<>();
+        double half = width / 2;
+        for (int i = 0; i < clean.size(); i++) {
+            Vector2d before = normals.get(Math.max(0, i - 1));
+            Vector2d after = normals.get(Math.min(normals.size() - 1, i));
+            Vector2d sum = before.add(after);
+            Vector2d miter = sum.length() < 1e-6 ? after : sum.normalize();
+            double dot = miter.dot(after);
+            double offset = Math.min(half * 2.5, half / Math.max(0.25, dot));
+            left.add(clean.get(i).add(miter.mul(offset)));
+            right.add(clean.get(i).sub(miter.mul(offset)));
+        }
+        Collections.reverse(right); left.addAll(right); return left;
+    }
+
+    private void addFairwayMarker(MarkerSet set, Map<String, Object> item) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> points = (List<Map<String, Object>>) item.get("points");
+        if (points == null) return;
+        String geometry = (String) item.getOrDefault("geometry", "corridor");
+        List<Vector2d> shapePoints = new ArrayList<>();
+        if ("corridor".equals(geometry)) {
+            shapePoints = fairwayPolygon(points, toDouble(item.getOrDefault("width", 40)));
+        } else if ("polygon".equals(geometry)) {
+            for (Map<String, Object> p : points)
+                shapePoints.add(new Vector2d(toDouble(p.get("x")), toDouble(p.get("z"))));
+        } else return;
+        if (shapePoints.size() < 3) return;
+        Shape.Builder builder = Shape.builder();
+        for (Vector2d pt : shapePoints) builder.addPoint(pt);
+        String title = (String) item.getOrDefault("title", "Fairway");
+        String subtitle = (String) item.getOrDefault("subtitle", "");
+        String colorHex = (String) item.getOrDefault("color", "#00bfff");
+        int[] rgb = hexToRgb(colorHex);
+        double fill = Math.max(0, Math.min(1, toDouble(item.getOrDefault("fill", 0.25))));
+        ShapeMarker marker = new ShapeMarker(title, builder.build(), (float) toDouble(item.getOrDefault("y", 64)));
+        marker.setDetail(escapeHtml(title) + (subtitle.isBlank() ? "" : "<br>" + escapeHtml(subtitle)));
+        marker.setLineColor(new Color(rgb[0], rgb[1], rgb[2], 1f));
+        marker.setFillColor(new Color(rgb[0], rgb[1], rgb[2], (float) fill));
+        marker.setLineWidth(2); marker.setDepthTestEnabled(false);
+        set.getMarkers().put((String) item.getOrDefault("id", "fairway"), marker);
     }
 
     private void addTextMarker(MarkerSet set, Map<String, Object> item) {

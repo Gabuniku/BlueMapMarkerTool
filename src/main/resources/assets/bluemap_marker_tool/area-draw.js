@@ -594,7 +594,7 @@
     }
 
     refresh();
-    preview();
+    // The server owns the initial marker sets; preview begins only after marker JSON loads.
     console.log("XynMarkers v3 loaded. Press Shift+Alt+X to open the editor.");
   }
   boot();

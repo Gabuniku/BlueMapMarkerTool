@@ -3,6 +3,7 @@ const fs = require("node:fs");
 
 const script = fs.readFileSync("src/main/resources/assets/bluemap_marker_tool/area-draw.js", "utf8");
 const geometry = require("../src/main/resources/assets/bluemap_marker_tool/fairway-geometry.js");
+const network = require("../src/main/resources/assets/bluemap_marker_tool/fairway-network.js");
 
 class Element {
   constructor(tag) {
@@ -92,6 +93,7 @@ async function main() {
   };
   const window = {
     XYNFairwayGeometry: geometry,
+    XYNFairwayNetwork: network,
     bluemap: { mapViewer, markerFileManager: {} },
     location: { protocol: "https:", origin: "https://example.invalid", hostname: "example.invalid" }
   };
@@ -183,7 +185,46 @@ async function main() {
   }
   assert(writes.length >= 8);
   assert.equal(writes.at(-1).items.find(item => item.type === "fairway").points[0].name, names[0].value);
-  console.log("Marker editor and fairway/waypoint smoke tests: PASS");
+  // A second navigable corridor supports a branch from an existing junction.
+  newFairway.onclick();
+  clickMap(320); clickMap(380);
+  const corridor = writes.at(-1).items.at(-1);
+  assert.equal(corridor.geometry, "corridor");
+  const branches = editor.querySelectorAll("[data-route-branch]");
+  assert.equal(branches.length, 2);
+  assert.equal(typeof branches[0].onclick, "function");
+  branches[0].onclick();
+  let doc = writes.at(-1);
+  let child = doc.items.at(-1);
+  const parent = doc.items.at(-2);
+  assert.equal(child.points.length, 1);
+  assert.equal(child.points[0].nodeId, parent.points[0].nodeId);
+  clickMap(700); // new branch endpoint
+  doc = writes.at(-1); child = doc.items.at(-1);
+  assert.equal(child.points.length, 2);
+  assert.equal(network.buildGraph(doc.items).edges.length >= 2, true);
+
+  // Renaming the branch junction updates its counterpart on the original fairway.
+  const sharedNames = editor.querySelectorAll("[data-route-name]");
+  sharedNames[0].value = "River junction";
+  sharedNames[0].onchange();
+  doc = writes.at(-1);
+  assert.equal(doc.items.at(-2).points[0].name, "River junction");
+  assert.equal(doc.items.at(-1).points[0].name, "River junction");
+  const sharedLabels = Object.keys(sets.get("waypoints").markers).filter(k => k.startsWith("shared-wp-"));
+  assert.equal(sharedLabels.length, 1, "Connected node should have just one label");
+
+  // A fresh fairway snaps to the existing second node rather than duplicating it.
+  newFairway.onclick();
+  clickMap(452, 258);
+  doc = writes.at(-1);
+  assert.equal(doc.items.at(-1).points.length, 1);
+  assert.equal(doc.items.at(-1).points[0].nodeId, doc.items.at(-3).points[1].nodeId);
+  clickMap(730);
+  doc = writes.at(-1);
+  assert.equal(doc.items.at(-1).points.length, 2);
+  assert.equal(network.buildGraph(doc.items).edges.length >= 3, true);
+  console.log("Marker editor, fairway branching, and waypoint smoke tests: PASS");
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -11,11 +11,9 @@
     window.__xynMarkersLoaded = true;
 
     const mv = bm.mapViewer;
-    const mfm = bm.markerFileManager;
     const Vec3 = mv.raycaster.ray.origin.constructor;
     const getCam = () => mv._camera || mv.camera;
     const getCanvas = () => mv.rootElement.querySelector("canvas");
-    try { clearInterval(mfm._updateInterval); } catch (e) {}
 
     // ---- API config (read from xyn-config.json written by the mod) ----
     let API_URL = null; // set after config loads
@@ -89,11 +87,6 @@
     tip.innerHTML = '<div class="t"></div><div class="s"></div>';
     document.body.appendChild(tip);
 
-    const labelLayer = document.createElement("div");
-    labelLayer.id = "xynLabels";
-    document.body.appendChild(labelLayer);
-    const labelEls = {};
-
 
     // ---- model ----
     let model = { items: [] };
@@ -128,49 +121,105 @@
     }
 
     // ---- BlueMap live preview ----
-    function centroid(pts) {
-      return { x: Math.round(pts.reduce((s, p) => s + p.x, 0) / pts.length), z: Math.round(pts.reduce((s, p) => s + p.z, 0) / pts.length) };
+    const ROUTE_TYPES = Object.freeze({
+      road: { setId: "roads", label: "Roads", name: "Road", color: "#efa53a", width: 5, defaultY: 70 },
+      sea: { setId: "sea_routes", label: "Sea Routes", name: "Sea Route", color: "#259cfa", width: 4, defaultY: 63 },
+      air: { setId: "air_routes", label: "Air Routes", name: "Air Route", color: "#bf85f7", width: 3, defaultY: 160 }
+    });
+    const TOOL_SETS = ["areas", "labels", "roads", "sea_routes", "air_routes"];
+    function isRoute(type) { return Object.prototype.hasOwnProperty.call(ROUTE_TYPES, type); }
+    function heightAt(point, item) {
+      return point.y !== undefined && Number.isFinite(Number(point.y)) ? Number(point.y) : Number(item.y) || 64;
+    }
+    function bboxCenter(points) {
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (const p of points) {
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+        minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+      }
+      return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 };
+    }
+    function safeHex(value, fallback = "#ffffff") {
+      return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value : fallback;
     }
     function buildData() {
-      const sets = { areas: { label: "Areas", toggleable: true, defaultHidden: false, markers: {} } };
-      model.items.forEach((it) => {
-        if (it.type !== "area" || it.points.length < 2) return;
-        const c = hex2rgb(it.color);
-        const ct = centroid(it.points);
-        sets.areas.markers[it.id] = {
-          type: "shape", label: it.title,
-          detail: `<b>${esc(it.title)}</b>` + (it.subtitle ? `<br>${esc(it.subtitle)}` : ""),
-          position: { x: ct.x, y: it.y, z: ct.z },
-          shape: it.points.map((p) => ({ x: p.x, z: p.z })),
-          shapeY: it.y, lineWidth: 3,
-          lineColor: { r: c.r, g: c.g, b: c.b, a: 1 },
-          fillColor: { r: c.r, g: c.g, b: c.b, a: it.fill != null ? it.fill : 0.25 },
-          depthTest: false, listed: true
-        };
-      });
+      const sets = {
+        areas: { label: "Areas", toggleable: true, defaultHidden: false, markers: {} },
+        labels: { label: "Text Labels", toggleable: true, defaultHidden: false, markers: {} }
+      };
+      for (const type of Object.keys(ROUTE_TYPES)) {
+        const route = ROUTE_TYPES[type];
+        sets[route.setId] = { label: route.label, toggleable: true, defaultHidden: false, markers: {} };
+      }
+      for (const it of model.items) {
+        if (!it || !Array.isArray(it.points)) continue;
+        const points = it.points;
+        if (it.type === "area") {
+          if (points.length < 3) continue;
+          const c = hex2rgb(safeHex(it.color, "#4caf50"));
+          const ct = bboxCenter(points.map(p => ({ x: Number(p.x) || 0, y: Number(it.y) || 64, z: Number(p.z) || 0 })));
+          const title = String(it.title || ""), subtitle = String(it.subtitle || "");
+          sets.areas.markers[it.id] = {
+            type: "shape", label: title,
+            detail: esc(title) + (subtitle ? "<br><i>" + esc(subtitle) + "</i>" : ""),
+            position: ct,
+            shape: points.map(p => ({ x: Number(p.x) || 0, z: Number(p.z) || 0 })),
+            shapeY: Number(it.y) || 64, lineWidth: 3,
+            lineColor: { r: c.r, g: c.g, b: c.b, a: 1 },
+            fillColor: { r: c.r, g: c.g, b: c.b, a: it.fill != null ? Number(it.fill) : 0.25 },
+            depthTest: false, listed: true
+          };
+        } else if (it.type === "text") {
+          if (points.length < 1) continue;
+          const p = points[0], title = String(it.title || ""), subtitle = String(it.subtitle || "");
+          const marker = {
+            type: "html", label: title.trim() || subtitle.trim() || "Text",
+            position: { x: Number(p.x) || 0, y: Number(it.y) || 64, z: Number(p.z) || 0 },
+            anchor: { x: 0, y: 0 },
+            html: '<div class="xyn-label" style="color:' + safeHex(it.color) + '"><div class="xyn-title">' + esc(title) + '</div>' +
+              (subtitle ? '<div class="xyn-sub">' + esc(subtitle) + '</div>' : "") + "</div>",
+            classes: ["xyn-text-marker"], listed: true,
+            minDistance: Math.max(0, Number(it.minDist) || 0)
+          };
+          if (Number(it.maxDist) > 0) marker.maxDistance = Number(it.maxDist);
+          sets.labels.markers[it.id] = marker;
+        } else if (isRoute(it.type)) {
+          if (points.length < 2) continue;
+          const route = ROUTE_TYPES[it.type];
+          const line = points.map(p => ({ x: Number(p.x) || 0, y: heightAt(p, it), z: Number(p.z) || 0 }));
+          const c = hex2rgb(safeHex(it.color, route.color));
+          const title = String(it.title || ""), subtitle = String(it.subtitle || "");
+          const marker = {
+            type: "line", label: title.trim() || route.name,
+            detail: esc(title) + (subtitle ? "<br><i>" + esc(subtitle) + "</i>" : ""),
+            position: bboxCenter(line), line,
+            lineWidth: Math.min(30, Math.max(1, Math.round(Number(it.lineWidth) || route.width))),
+            lineColor: { r: c.r, g: c.g, b: c.b, a: 1 },
+            depthTest: false, listed: true,
+            minDistance: Math.max(0, Number(it.minDist) || 0)
+          };
+          if (Number(it.maxDist) > 0) marker.maxDistance = Number(it.maxDist);
+          sets[route.setId].markers[it.id] = marker;
+        }
+      }
       return sets;
     }
-    function preview() { try { mfm.updateFromData(buildData()); } catch (e) { console.warn("preview", e); } }
-
-    // ---- text label overlay ----
-    function renderLabels() {
-      const cam = getCam();
-      const seen = {};
-      model.items.forEach((it) => {
-        if (it.type !== "text" || !it.points.length) return;
-        seen[it.id] = 1;
-        let el = labelEls[it.id];
-        if (!el) { el = document.createElement("div"); el.className = "xyn-ovl"; labelLayer.appendChild(el); labelEls[it.id] = el; }
-        const p = it.points[0];
-        const dist = Math.hypot(cam.position.x - p.x, cam.position.y - it.y, cam.position.z - p.z);
-        const min = it.minDist || 0, max = it.maxDist || 0;
-        const visByZoom = dist >= min && (max === 0 || dist <= max);
-        const s = worldToScreen(p.x, p.z, it.y);
-        if (!s.vis || !visByZoom) { el.style.display = "none"; return; }
-        el.style.display = "block"; el.style.left = s.x + "px"; el.style.top = s.y + "px";
-        el.innerHTML = `<div class="xyn-label" style="color:${it.color}"><div class="xyn-title">${esc(it.title)}</div>${it.subtitle ? `<div class="xyn-sub">${esc(it.subtitle)}</div>` : ""}</div>`;
-      });
-      Object.keys(labelEls).forEach((id) => { if (!seen[id]) { labelEls[id].remove(); delete labelEls[id]; } });
+    function preview() {
+      const root = bm.mapViewer && bm.mapViewer.markers;
+      if (!root || typeof root.updateMarkerSetFromData !== "function") return;
+      const sets = buildData();
+      try {
+        for (const id of TOOL_SETS) {
+          if (Object.keys(sets[id].markers).length) {
+            root.updateMarkerSetFromData(id, sets[id]);
+          } else {
+            const emptySet = root.markerSets && root.markerSets.get(id);
+            if (emptySet) root.remove(emptySet);
+          }
+        }
+      } catch (e) { console.warn("preview", e); }
     }
 
     // ---- SVG vertex overlay ----

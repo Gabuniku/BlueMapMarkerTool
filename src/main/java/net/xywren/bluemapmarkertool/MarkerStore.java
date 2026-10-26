@@ -306,6 +306,92 @@ public class MarkerStore {
         set.getMarkers().put(id, marker);
     }
 
+    private void addFairwayMarker(MarkerSet set, Map<String, Object> item) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> raw = (List<Map<String, Object>>) item.get("points");
+        if (raw == null) return;
+
+        String geometry = (String) item.getOrDefault("geometry", "corridor");
+        List<Vector2d> centerline = new ArrayList<>();
+        for (Map<String, Object> point : raw) {
+            double x = toDouble(point.get("x"));
+            double z = toDouble(point.get("z"));
+            if (!Double.isFinite(x) || !Double.isFinite(z)) return;
+            centerline.add(new Vector2d(x, z));
+        }
+
+        List<Vector2d> shapePoints;
+        if ("polygon".equals(geometry)) {
+            shapePoints = centerline;
+        } else if ("corridor".equals(geometry)) {
+            double width = toDouble(item.getOrDefault("width", 40));
+            if (!Double.isFinite(width) || width <= 0) return;
+            shapePoints = FairwayGeometry.corridorPolygon(centerline, Math.min(4096, width));
+        } else {
+            return;
+        }
+        if (shapePoints.size() < 3 ||
+                FairwayGeometry.hasSelfIntersection(shapePoints)) return;
+
+        Shape.Builder builder = Shape.builder();
+        for (Vector2d point : shapePoints) builder.addPoint(point);
+        String title = (String) item.getOrDefault("title", "");
+        String subtitle = (String) item.getOrDefault("subtitle", "");
+        String colorHex = (String) item.getOrDefault("color", "#00bfff");
+        int[] rgb = hexToRgb(colorHex);
+        double y = toDouble(item.getOrDefault("y", 64));
+        double fill = toDouble(item.getOrDefault("fill", 0.25));
+        if (!Double.isFinite(y) || !Double.isFinite(fill)) return;
+
+        ShapeMarker marker = new ShapeMarker(
+                title.isBlank() ? "Fairway" : title,
+                builder.build(), (float) y);
+        marker.setDetail(escapeHtml(title) +
+                (subtitle.isEmpty() ? "" : "<br><i>" + escapeHtml(subtitle) + "</i>"));
+        marker.setLineColor(new Color(rgb[0], rgb[1], rgb[2], 1f));
+        marker.setFillColor(new Color(rgb[0], rgb[1], rgb[2],
+                (float) Math.max(0, Math.min(1, fill))));
+        marker.setLineWidth(2);
+        marker.setDepthTestEnabled(false);
+        marker.setListed(true);
+        set.getMarkers().put((String) item.getOrDefault("id", "fairway"), marker);
+    }
+
+    private void addNamedWaypoints(MarkerSet set, Map<String, Object> item) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> raw = (List<Map<String, Object>>) item.get("points");
+        if (raw == null) return;
+        String id = (String) item.getOrDefault("id", "marker");
+        String type = (String) item.getOrDefault("type", "");
+        double fallbackY = toDouble(item.getOrDefault("y", 64));
+        for (int i = 0; i < raw.size(); i++) {
+            Map<String, Object> point = raw.get(i);
+            String name = String.valueOf(point.getOrDefault("name", "")).trim();
+            if (name.isEmpty()) continue;
+
+            double x = toDouble(point.get("x"));
+            double z = toDouble(point.get("z"));
+            double y = !"fairway".equals(type) && point.containsKey("y")
+                    ? toDouble(point.get("y")) : fallbackY;
+            if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) continue;
+
+            String html = "<span style=\"display:inline-block;transform:translate(-50%,-100%);"
+                    + "white-space:nowrap;color:white;background:#123b50df;border:1px solid #85c5e0;"
+                    + "border-radius:5px;padding:3px 6px;font:12px system-ui,sans-serif;"
+                    + "text-shadow:0 1px 2px #000;pointer-events:none\">"
+                    + "<span style=\"color:#a9e3ff\">●</span> "
+                    + escapeHtml(name) + "</span>";
+
+            HtmlMarker marker = new HtmlMarker(name,
+                    new Vector3d(x, y, z), html, new Vector2i(0, 0));
+            marker.setListed(true);
+
+            String waypointId = String.valueOf(point.getOrDefault("id", i))
+                    .replaceAll("[^a-zA-Z0-9_-]", "_");
+            set.getMarkers().put(id + "-wp-" + waypointId, marker);
+        }
+    }
+
     private String escapeHtml(String value) {
         return value
             .replace("&", "&amp;")

@@ -3,11 +3,14 @@ package net.xywren.bluemapmarkertool;
 import de.bluecolored.bluemap.api.BlueMapAPI;
 import de.bluecolored.bluemap.api.BlueMapMap;
 import de.bluecolored.bluemap.api.markers.HtmlMarker;
+import de.bluecolored.bluemap.api.markers.LineMarker;
 import de.bluecolored.bluemap.api.markers.MarkerSet;
 import de.bluecolored.bluemap.api.markers.ShapeMarker;
 import de.bluecolored.bluemap.api.math.Color;
+import de.bluecolored.bluemap.api.math.Line;
 import de.bluecolored.bluemap.api.math.Shape;
 import com.flowpowered.math.vector.Vector2d;
+import com.flowpowered.math.vector.Vector3d;
 import com.flowpowered.math.vector.Vector2i;
 
 import java.io.*;
@@ -105,8 +108,10 @@ public class MarkerStore {
         labels.setToggleable(true);
         MarkerSet fairways = new MarkerSet("Fairways");
         fairways.setToggleable(true);
+        MarkerSet routes = new MarkerSet("Routes");
+        routes.setToggleable(true);
 
-        parseAndAddMarkers(areas, labels, fairways);
+        parseAndAddMarkers(areas, labels, fairways, routes);
 
         if (!areas.getMarkers().isEmpty()) {
             map.getMarkerSets().put("areas", areas);
@@ -120,9 +125,11 @@ public class MarkerStore {
         }
         if (!fairways.getMarkers().isEmpty()) map.getMarkerSets().put("fairways", fairways);
         else map.getMarkerSets().remove("fairways");
+        if (!routes.getMarkers().isEmpty()) map.getMarkerSets().put("routes", routes);
+        else map.getMarkerSets().remove("routes");
     }
 
-    private void parseAndAddMarkers(MarkerSet areas, MarkerSet labels, MarkerSet fairways) {
+    private void parseAndAddMarkers(MarkerSet areas, MarkerSet labels, MarkerSet fairways, MarkerSet routes) {
         try {
             List<Map<String, Object>> items = parseItems(cachedJson);
             for (Map<String, Object> item : items) {
@@ -133,6 +140,8 @@ public class MarkerStore {
                     addTextMarker(labels, item);
                 } else if ("fairway".equals(type)) {
                     addFairwayMarker(fairways, item);
+                } else if ("route".equals(type)) {
+                    addRouteMarker(routes, item);
                 }
             }
         } catch (Exception e) {
@@ -174,6 +183,25 @@ public class MarkerStore {
         marker.setDepthTestEnabled(false);
 
         set.getMarkers().put(id, marker);
+    }
+
+    private void addRouteMarker(MarkerSet set, Map<String, Object> item) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> points = (List<Map<String, Object>>) item.get("points");
+        if (points == null || points.size() < 2) return;
+        double y = toDouble(item.getOrDefault("y", 64));
+        Line.Builder line = Line.builder();
+        for (Map<String, Object> p : points)
+            line.addPoint(new Vector3d(toDouble(p.get("x")), y, toDouble(p.get("z"))));
+        String title = (String) item.getOrDefault("title", "Route");
+        String subtitle = (String) item.getOrDefault("subtitle", "");
+        int[] rgb = hexToRgb((String) item.getOrDefault("color", "#00bfff"));
+        LineMarker marker = new LineMarker(title, line.build());
+        marker.setDetail(escapeHtml(title) + (subtitle.isBlank() ? "" : "<br>" + escapeHtml(subtitle)));
+        marker.setLineColor(new Color(rgb[0], rgb[1], rgb[2], 1f));
+        marker.setLineWidth((int) Math.max(1, Math.min(20, toDouble(item.getOrDefault("lineWidth", 3)))));
+        marker.setDepthTestEnabled(false);
+        set.getMarkers().put((String) item.getOrDefault("id", "route"), marker);
     }
 
     // Widen a centerline into a polygon using offset vectors and bounded miter joins.

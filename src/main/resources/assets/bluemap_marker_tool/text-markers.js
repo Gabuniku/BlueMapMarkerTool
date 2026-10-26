@@ -85,6 +85,25 @@
     return set;
   }
 
+  function buildWaypointSet() {
+    const set = { label: "Waypoints", toggleable: true, defaultHidden: true, markers: {} };
+    model.items.forEach(item => {
+      if (!item || !["route", "fairway"].includes(item.type) || !Array.isArray(item.points)) return;
+      item.points.forEach((point, index) => {
+        if (!point || !String(point.name || "").trim()) return;
+        const name = String(point.name).trim();
+        set.markers[item.id + "-wp-" + (point.id || index)] = {
+          type: "html", label: name,
+          position: { x: Number(point.x), y: Number(item.y) || 64, z: Number(point.z) },
+          anchor: { x: 0, y: 0 },
+          html: '<span style="color:white;background:#123b50c9;padding:3px 6px;border-radius:5px;font:12px system-ui">'+esc(name)+"</span>",
+          listed: true, minDistance: 0
+        };
+      });
+    });
+    return set;
+  }
+
   function buildRouteSet() {
     const set = { label: "Routes", toggleable: true, defaultHidden: false, markers: {} };
     model.items.forEach(item => {
@@ -171,6 +190,7 @@
       manager.root.updateMarkerSetFromData("labels", buildTextSet());
       manager.root.updateMarkerSetFromData("fairways", buildFairwaySet());
       manager.root.updateMarkerSetFromData("routes", buildRouteSet());
+      manager.root.updateMarkerSetFromData("waypoints", buildWaypointSet());
     } catch (error) {
       console.warn("BlueMap Marker Tool could not refresh managed markers", error);
     }
@@ -186,6 +206,7 @@
     if (!localEditorPreview) incoming.areas = buildAreaSet();
     if (!localEditorPreview) incoming.fairways = buildFairwaySet();
     if (!localEditorPreview) incoming.routes = buildRouteSet();
+    if (!localEditorPreview) incoming.waypoints = buildWaypointSet();
     incoming.labels = buildTextSet();
     return incoming;
   }

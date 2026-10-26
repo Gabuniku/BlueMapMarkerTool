@@ -85,6 +85,22 @@
     return set;
   }
 
+  function buildRouteSet() {
+    const set = { label: "Routes", toggleable: true, defaultHidden: false, markers: {} };
+    model.items.forEach(item => {
+      if (!item || item.type !== "route" || !Array.isArray(item.points) || item.points.length < 2) return;
+      const color = hex2rgb(item.color || "#00bfff"), center = shapeCenter(item.points), y = Number(item.y) || 64;
+      set.markers[item.id] = {
+        type: "line", label: item.title || "", detail: esc(item.subtitle || ""),
+        position: { x: center.x, y, z: center.z },
+        line: item.points.map(pt => ({ x: Number(pt.x), y, z: Number(pt.z) })),
+        lineWidth: Number(item.lineWidth) || 3, lineColor: { ...color, a: 1 },
+        depthTest: false, listed: true
+      };
+    });
+    return set;
+  }
+
   function buildFairwaySet() {
     const set = { label: "Fairways", toggleable: true, defaultHidden: false, markers: {} };
     model.items.forEach(item => {
@@ -154,6 +170,7 @@
       manager.root.updateMarkerSetFromData("areas", buildAreaSet());
       manager.root.updateMarkerSetFromData("labels", buildTextSet());
       manager.root.updateMarkerSetFromData("fairways", buildFairwaySet());
+      manager.root.updateMarkerSetFromData("routes", buildRouteSet());
     } catch (error) {
       console.warn("BlueMap Marker Tool could not refresh managed markers", error);
     }
@@ -164,10 +181,11 @@
     delete incoming["xyn-areas"];
 
     const keys = Object.keys(incoming);
-    const localEditorPreview = keys.length > 0 && keys.every(k => k === "areas" || k === "fairways");
+    const localEditorPreview = keys.length > 0 && keys.every(k => k === "areas" || k === "fairways" || k === "routes");
 
     if (!localEditorPreview) incoming.areas = buildAreaSet();
     if (!localEditorPreview) incoming.fairways = buildFairwaySet();
+    if (!localEditorPreview) incoming.routes = buildRouteSet();
     incoming.labels = buildTextSet();
     return incoming;
   }

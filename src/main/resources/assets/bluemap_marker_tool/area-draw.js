@@ -700,6 +700,41 @@
         }
         out += "    }\n  }\n";
       }
+      // Export the generated fairways and named waypoint labels using the
+      // same marker data that BlueMap receives for live previews.
+      const generated = buildData();
+      for (const id of ["fairways", "waypoints"]) {
+        const set = generated[id];
+        const entries = Object.entries(set.markers);
+        if (!entries.length) continue;
+        out += "  " + id + ": {\n    label: " + JSON.stringify(set.label) +
+          "\n    toggleable: true\n" +
+          (set.defaultHidden ? "    default-hidden: true\n" : "") +
+          "    markers: {\n";
+        for (const [markerId, marker] of entries) {
+          const p = marker.position;
+          out += "      " + JSON.stringify(markerId) + ": {\n" +
+              "        type: " + JSON.stringify(marker.type) + "\n" +
+              "        label: " + JSON.stringify(marker.label) + "\n" +
+              "        position: { x: " + p.x + ", y: " + p.y + ", z: " + p.z + " }\n";
+          if (marker.type === "shape") {
+            const c = marker.lineColor, fc = marker.fillColor;
+            out += "        detail: " + JSON.stringify(marker.detail) + "\n" +
+                "        shape: [\n" +
+                marker.shape.map(pt => "          { x: " + pt.x + ", z: " + pt.z + " }").join("\n") + "\n" +
+                "        ]\n        shape-y: " + marker.shapeY +
+                "\n        line-width: " + marker.lineWidth +
+                "\n        line-color: { r: " + c.r + ", g: " + c.g + ", b: " + c.b + ", a: " + c.a + " }" +
+                "\n        fill-color: { r: " + fc.r + ", g: " + fc.g + ", b: " + fc.b + ", a: " + fc.a + " }" +
+                "\n        depth-test: false\n";
+          } else {
+            out += "        anchor: { x: 0, y: 0 }\n" +
+                "        html: " + JSON.stringify(marker.html) + "\n";
+          }
+          out += "      }\n";
+        }
+        out += "    }\n  }\n";
+      }
       out += "}\n";
       navigator.clipboard.writeText(out).then(() => msg("Config copied ✓"), () => msg("Copy failed — see console"));
       console.log(out);

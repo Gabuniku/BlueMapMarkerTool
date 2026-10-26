@@ -1,80 +1,84 @@
 # BlueMap Marker Tool
 
-A NeoForge server-side mod that adds a click-to-draw marker editor directly inside the [BlueMap](https://github.com/BlueMap-Minecraft/BlueMap) web interface.
+A server-side marker editor for BlueMap on Minecraft 1.21.1 / NeoForge 21.1.x.
+Draw and edit areas, text labels and 3D routes from the BlueMap administrator menu.
 
-Draw area polygons and text labels on the live map. Markers are saved to the server and visible to every viewer — no client mod required.
+## Marker types
 
----
+| Editor type | BlueMap set ID | Marker tab label | Appearance |
+| --- | --- | --- | --- |
+| Area | `areas` | Areas | Filled polygon |
+| Text | `labels` | Text Labels | HTML text label |
+| Road | `roads` | Roads | Orange line, 5 px by default |
+| Sea Route | `sea_routes` | Sea Routes | Blue line, 4 px by default |
+| Air Route | `air_routes` | Air Routes | Purple line, 3 px by default |
+
+Each set is independently toggleable in BlueMap's marker tab. Road, sea and air routes are open 3D polylines backed by BlueMap's native `LineMarker`. The three route categories use the same waypoint model.
 
 ## Requirements
 
 - Minecraft 1.21.1
 - NeoForge 21.1.x
-- [BlueMap NeoForge mod](https://github.com/BlueMap-Minecraft/BlueMap) installed on the same server
-- An open port for the marker API (separate from BlueMap's web port)
-
----
+- BlueMap with BlueMapAPI 2.7-compatible marker support
+- JDK 21 for building the mod
 
 ## Installation
 
-1. Drop `BlueMapMarkerTool-1.0.jar` into your server's `mods/` folder alongside BlueMap.
-2. Start the server. The mod auto-generates its config and deploys the editor script into BlueMap's webroot — no manual file copying needed.
-3. Open `config/bluemap-marker-tool.toml` and set `api_port` to a port that is open and reachable on your server (see below).
-4. Restart the server.
-5. Open the BlueMap web interface in your browser.
+Build the jar with `./gradlew build`, or use the jar from a matching release. Place one version in the server's `mods/` directory and restart the server. The mod deploys its JavaScript into BlueMap's webroot automatically.
 
-> **Port note:** The marker editor saves changes to the server via a small REST API that runs on **its own port, separate from BlueMap's web port.**
-> BlueMap's built-in web server is static-only and cannot receive saves, so this mod opens a second listener to catch marker edits.
-> You must allocate an open port on your host — **it must NOT be the same port BlueMap's web server uses**, or neither will start.
-> On managed hosts (e.g. PebbleHost) this is done via the "Additional Ports" panel.
-> The default is `8034`. Change it to whatever port your host has assigned you if 8034 is unavailable.
-
----
-
-## Controls
-
-| Action | How |
-|---|---|
-| **Open / close editor** | Hold `Space`, then press `Tab` |
-| **New area marker** | Click **▰ New Area** in the panel, then click the map to place corners |
-| **New text label** | Click **T New Text** in the panel, then click the map to place it |
-| **Finish drawing** | Click **✓ Done** |
-| **Edit / move vertices** | Select a marker, click **✎ Edit**, then drag vertices on the map |
-| **Insert a vertex** | In Edit mode, click on the outline between two existing vertices |
-| **Delete a vertex** | In Edit mode, double-click a vertex |
-| **Delete a marker** | Click **✕** next to it in the marker list |
-| **Set text zoom threshold** | Use **Min dist** / **Max dist** fields (camera distance in blocks at which the label appears/disappears) |
-| **Copy BlueMap HOCON config** | Click **📋 Copy BlueMap config** to copy a static marker-sets block for `overworld.conf` |
-
-Markers are saved to the server automatically after every edit and are immediately visible to all viewers.
-
----
-
-## Config (`config/bluemap-marker-tool.toml`)
+Edit the server config `config/bluemap-marker-tool.toml`:
 
 ```toml
-# Port for the marker REST API. Must be open/reachable on your server,
-# and MUST be different from BlueMap's web-server port.
 api_port = 8034
-
-# BlueMap map ID to push area markers to (matches the folder name under bluemap/maps/).
 map_id = "overworld"
+secret = "replace-with-your-own-password"
 ```
 
----
+Change the default password before exposing the editor. The marker API runs on a separate port; do not expose it publicly without access controls. For BlueMap served through Cloudflare Tunnel over HTTPS, route the same-origin `/xyn/markers` path internally to the marker API and serve all other paths from BlueMap. Keep the marker API bound to a trusted network or host.
 
-## How it works
+After an upgrade, hard-reload BlueMap. If Cloudflare caches `settings.json` or the injected scripts, purge those paths so the browser receives the new versioned scripts.
 
-On startup the mod:
-- Extracts `area-draw.js` from the jar into BlueMap's webroot
-- Registers it with BlueMap's webapp API so it loads automatically in every browser
-- Writes `xyn-config.json` to the webroot so the editor knows which port to talk to
-- Starts a lightweight HTTP server on `api_port`
+## Administrator editor
 
-Marker data is stored in `config/xynovia/markers.json` and pushed to BlueMap's live marker API on every save so viewers see updates without a page refresh.
+Open **Administrator** from the BlueMap menu and log in.
 
----
+- Choose **New Area**, **New Text**, **Road**, **Sea Route**, or **Air Route**.
+- Click the map to add vertices or route waypoints. Routes become visible once at least two waypoints have been placed.
+- Use **Done** to stop drawing, or **Edit / Path** to move existing points.
+- Drag a vertex to move it horizontally. Click near a segment in edit mode to insert a vertex.
+- Double-click a vertex to delete it.
+- For routes, edit each waypoint's **X / Y / Z** numerically, reorder with arrow buttons, or delete with the cross button.
+- Set **Next Y** to control the elevation for newly added route points; existing point Y values remain unchanged.
+- Set the route **line width**, color, title, subtitle, and minimum/maximum display distances in the editor.
+- All changes are saved to `config/xynovia/markers.json`. BlueMap also receives native marker updates server-side.
+
+Roads and sea routes do **not** automatically follow terrain, water height, or the seabed. Enter appropriate Y values for each waypoint. BlueMap's built-in line marker does not provide a dashed-line option in this implementation.
+
+## Saved data
+
+All types share the same `items` array in `config/xynovia/markers.json`. Route items use one of `road`, `sea`, or `air` as their `type`:
+
+```json
+{
+  "items": [
+    {
+      "id": "road-1",
+      "type": "road",
+      "title": "Main Road",
+      "subtitle": "",
+      "color": "#efa53a",
+      "lineWidth": 5,
+      "y": 70,
+      "minDist": 0,
+      "maxDist": 0,
+      "points": [{ "x": 100, "y": 70, "z": 200 }, { "x": 200, "y": 75, "z": 230 }]
+    }
+  ]
+}
+```
+
+Existing Area and Text records remain compatible. BlueMap's standard marker sets are generated by the server, while the browser only previews edits to the five sets owned by this mod.
 
 ## Credits
 
-Built on top of [BlueMap](https://github.com/BlueMap-Minecraft/BlueMap) by [BlueColored](https://github.com/TBlueF).
+Uses [BlueMap](https://github.com/BlueMap-Minecraft/BlueMap) by BlueColored and contributors.

@@ -500,6 +500,9 @@
             <button id="xNewSea" style="flex:1;background:#136bac;color:#fff;border:0;border-radius:6px;padding:7px 2px;cursor:pointer">Sea Route</button>
             <button id="xNewAir" style="flex:1;background:#764aad;color:#fff;border:0;border-radius:6px;padding:7px 2px;cursor:pointer">Air Route</button>
           </div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <button id="xNewFairway" style="flex:1;background:#067e92;color:#fff;border:0;border-radius:6px;padding:7px;cursor:pointer">▱ New Fairway</button>
+          </div>
           <div id="xEdit"></div>
           <div style="font-size:12px;margin:6px 0 3px;color:#9ab">Markers</div>
           <div id="xList" style="max-height:150px;overflow:auto;font-size:12px"></div>
@@ -512,21 +515,23 @@
       $("xNewRoad").onclick = () => newItem("road");
       $("xNewSea").onclick = () => newItem("sea");
       $("xNewAir").onclick = () => newItem("air");
+      $("xNewFairway").onclick = () => newItem("fairway");
       $("xExport").onclick = exportConfig;
 
       const E = $("xEdit");
       if (sel) {
         const isArea = sel.type === "area";
+        const isFairway = sel.type === "fairway";
         E.innerHTML = `
           <div style="border:1px solid #333;border-radius:8px;padding:8px;margin-bottom:6px">
-            <div style="font-size:11px;color:#9ab;margin-bottom:4px">${isArea ? "AREA" : isRoute(sel.type) ? ROUTE_TYPES[sel.type].name.toUpperCase() : "TEXT"}</div>
-            <input id="xTitle" placeholder="Title (e.g. Xynovia)" value="${(sel.title || "").replace(/"/g, "&quot;")}" style="width:100%;box-sizing:border-box;margin-bottom:5px;background:#111;color:#eee;border:1px solid #444;border-radius:5px;padding:6px">
-            <input id="xSub" placeholder="Subtitle (e.g. Claimed by Xywren)" value="${(sel.subtitle || "").replace(/"/g, "&quot;")}" style="width:100%;box-sizing:border-box;margin-bottom:6px;background:#111;color:#eee;border:1px solid #444;border-radius:5px;padding:6px">
+            <div style="font-size:11px;color:#9ab;margin-bottom:4px">${isArea ? "AREA" : isFairway ? "FAIRWAY" : isRoute(sel.type) ? ROUTE_TYPES[sel.type].name.toUpperCase() : "TEXT"}</div>
+            <input id="xTitle" placeholder="Title (e.g. Xynovia)" value="${escAttr(sel.title || "")}" style="width:100%;box-sizing:border-box;margin-bottom:5px;background:#111;color:#eee;border:1px solid #444;border-radius:5px;padding:6px">
+            <input id="xSub" placeholder="Subtitle (e.g. Claimed by Xywren)" value="${escAttr(sel.subtitle || "")}" style="width:100%;box-sizing:border-box;margin-bottom:6px;background:#111;color:#eee;border:1px solid #444;border-radius:5px;padding:6px">
             <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
-              <label>${isArea ? "Colour" : isRoute(sel.type) ? "Line" : "Text"} <input id="xColor" type="color" value="${sel.color}" style="vertical-align:middle"></label>
+              <label>${isArea || isFairway ? "Colour" : isRoute(sel.type) ? "Line" : "Text"} <input id="xColor" type="color" value="${sel.color}" style="vertical-align:middle"></label>
               <label style="flex:1">${isRoute(sel.type) ? "Next Y" : "Y"} <input id="xY" type="number" value="${sel.y}" style="width:56px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"></label>
             </div>
-            ${isArea ? `<label style="display:block;margin-bottom:6px">Fill <input id="xFill" type="range" min="0" max="0.8" step="0.05" value="${sel.fill}" style="vertical-align:middle;width:130px"></label>` : `
+            ${isArea || isFairway ? `<label style="display:block;margin-bottom:6px">Fill <input id="xFill" type="range" min="0" max="0.8" step="0.05" value="${sel.fill}" style="vertical-align:middle;width:130px"></label>` : `
             <div style="border-top:1px solid #333;padding-top:6px;margin-bottom:6px">
               <div style="font-size:11px;color:#9ab;margin-bottom:4px">Show only when zoomed out past (blocks). Current: <b id="xDist">–</b></div>
               <label style="display:block;margin-bottom:4px">Min dist <input id="xMinD" type="number" value="${sel.minDist || 0}" style="width:80px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"> <button id="xSetMin" style="background:#444;color:#fff;border:0;border-radius:4px;padding:3px 6px;cursor:pointer">use current</button></label>
@@ -534,11 +539,11 @@
             </div>`}
             ${routePointEditorHtml(sel)}
             <div style="display:flex;gap:6px">
-              <button id="xDraw" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "draw" ? "#396" : "#444"};color:#fff">${isArea ? "✚ Draw" : isRoute(sel.type) ? "✚ Points" : "✚ Place"}</button>
-              <button id="xEditM" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "edit" ? "#396" : "#444"};color:#fff">${isArea ? "✎ Edit" : isRoute(sel.type) ? "✎ Path" : "✎ Move"}</button>
+              <button id="xDraw" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "draw" ? "#396" : "#444"};color:#fff">${isArea ? "✚ Draw" : isWaypointType(sel.type) ? "✚ Points" : "✚ Place"}</button>
+              <button id="xEditM" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "edit" ? "#396" : "#444"};color:#fff">${isArea ? "✎ Edit" : isWaypointType(sel.type) ? "✎ Path" : "✎ Move"}</button>
               <button id="xDone" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:#444;color:#fff">✓ Done</button>
             </div>
-            <div style="font-size:11px;color:#889;margin-top:5px">${sel.points.length} point${sel.points.length === 1 ? "" : "s"}${mode === "draw" ? (isArea ? " · click map to add corners" : isRoute(sel.type) ? " · click map to add waypoints (2+)" : " · click map to place") : mode === "edit" ? (isArea || isRoute(sel.type) ? " · drag/insert · dbl-click to delete" : " · drag to move") : ""}</div>
+            <div style="font-size:11px;color:#889;margin-top:5px">${sel.points.length} point${sel.points.length === 1 ? "" : "s"}${mode === "draw" ? (isArea ? " · click map to add corners" : isWaypointType(sel.type) ? " · click map to add waypoints" : " · click map to place") : mode === "edit" ? (isArea || isWaypointType(sel.type) ? " · drag/insert · dbl-click to delete" : " · drag to move") : ""}</div>
           </div>`;
         const on = (id, ev, fn) => { const el = $(id); if (el) el[ev] = fn; };
         on("xTitle", "oninput", (e) => { sel.title = e.target.value; persist(); preview(); renderList(); });
@@ -549,8 +554,21 @@
         on("xMinD", "onchange", (e) => { sel.minDist = parseInt(e.target.value) || 0; persist(); preview(); });
         on("xMaxD", "onchange", (e) => { sel.maxDist = parseInt(e.target.value) || 0; persist(); preview(); });
         on("xSetMin", "onclick", () => { sel.minDist = viewDistance(); persist(); preview(); refresh(); });
-        if (isRoute(sel.type)) {
+        if (isFairway) {
+          on("xGeometry", "onchange", (e) => {
+            sel.geometry = e.target.value === "polygon" ? "polygon" : "corridor";
+            persist(); preview(); refresh();
+          });
+          on("xFairwayWidth", "onchange", (e) => {
+            const value = Number(e.target.value);
+            if (!Number.isFinite(value) || value <= 0) return;
+            sel.width = Math.min(4096, Math.max(1, value));
+            persist(); preview(); refresh();
+          });
+        }
+        if (isWaypointType(sel.type)) {
           on("xWidth", "onchange", (e) => {
+            if (!isRoute(sel.type)) return;
             sel.lineWidth = Math.max(1, Math.min(30, Math.round(Number(e.target.value) || ROUTE_TYPES[sel.type].width)));
             e.target.value = sel.lineWidth;
             persist(); preview();
@@ -566,12 +584,26 @@
               persist(); preview();
             };
           });
+          E.querySelectorAll("[data-route-name]").forEach((input) => {
+            input.onchange = () => {
+              const idx = Number(input.dataset.routeName);
+              const point = sel.points[idx];
+              if (!point) return;
+              if (!point.id) point.id = uid();
+              point.name = input.value;
+              persist(); preview();
+            };
+          });
           for (const action of ["up", "down", "del"]) {
             E.querySelectorAll("[data-route-" + action + "]").forEach((btn) => {
               btn.onclick = () => {
                 const i = Number(btn.dataset["route" + action[0].toUpperCase() + action.slice(1)]);
                 if (!Number.isInteger(i) || !sel.points[i]) return;
-                if (action === "del") sel.points.splice(i, 1);
+                if (action === "del") {
+                  const minimum = isOpenLine(sel) ? 2 : 3;
+                  if (sel.points.length <= minimum) return;
+                  sel.points.splice(i, 1);
+                }
                 else {
                   const j = i + (action === "up" ? -1 : 1);
                   if (j < 0 || j >= sel.points.length) return;
@@ -596,7 +628,7 @@
         `<div data-id="${it.id}" style="display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;cursor:pointer;background:${sel && sel.id === it.id ? "#2a3340" : "transparent"}">
           <span style="width:11px;height:11px;border-radius:${it.type === "area" ? "2px" : "50%"};background:${it.color};display:inline-block;border:1px solid #0006"></span>
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.title)}</span>
-          <span style="color:#789;font-size:11px">${it.type === "area" ? "Area" : isRoute(it.type) ? ROUTE_TYPES[it.type].name : "Text"}</span>
+          <span style="color:#789;font-size:11px">${it.type === "area" ? "Area" : it.type === "fairway" ? "Fairway" : isRoute(it.type) ? ROUTE_TYPES[it.type].name : "Text"}</span>
           <span data-del="${it.id}" style="color:#f88;cursor:pointer">✕</span>
         </div>`).join("") || '<i style="color:#778">Nothing yet — add an Area, Text, or Route.</i>';
       L.querySelectorAll("[data-id]").forEach((el) => el.onclick = (ev) => {

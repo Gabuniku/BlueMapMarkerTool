@@ -19,11 +19,9 @@ public final class AdminWebAssets {
                 Files.createDirectories(webRoot);
 
                 deploy(webRoot, "admin-menu.js");
-                deploy(webRoot, "text-markers.js");
 
                 api.getWebApp().registerScript("admin-menu.js?v=" + BlueMapMarkerTool.VERSION);
-                api.getWebApp().registerScript("text-markers.js?v=" + BlueMapMarkerTool.VERSION);
-                BlueMapMarkerTool.LOGGER.info("[BlueMapMarkerTool] Administrator and text marker web assets deployed.");
+                BlueMapMarkerTool.LOGGER.info("[BlueMapMarkerTool] Administrator web asset deployed.");
             } catch (IOException e) {
                 BlueMapMarkerTool.LOGGER.error("[BlueMapMarkerTool] Failed to deploy web assets", e);
             }

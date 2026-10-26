@@ -1,5 +1,11 @@
 package net.xywren.bluemapmarkertool;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.reflect.TypeToken;
 import de.bluecolored.bluemap.api.BlueMapAPI;
 import de.bluecolored.bluemap.api.BlueMapMap;
 import de.bluecolored.bluemap.api.markers.HtmlMarker;
@@ -22,6 +28,9 @@ import java.util.*;
  * Persists markers to disk and syncs area and text markers to BlueMapAPI.
  */
 public class MarkerStore {
+
+    private static final Gson GSON = new Gson();
+    private static final java.lang.reflect.Type ITEM_TYPE = new TypeToken<Map<String, Object>>() {}.getType();
 
     private final Path dataFile;
     private String cachedJson = "{\"items\":[]}";
@@ -106,29 +115,33 @@ public class MarkerStore {
         MarkerSet roads = new MarkerSet("Roads");
         MarkerSet seaRoutes = new MarkerSet("Sea Routes");
         MarkerSet airRoutes = new MarkerSet("Air Routes");
-        for (MarkerSet set : List.of(areas, labels, roads, seaRoutes, airRoutes)) {
+        MarkerSet fairways = new MarkerSet("Fairways");
+        MarkerSet waypoints = new MarkerSet("Waypoints");
+        waypoints.setDefaultHidden(true);
+
+        for (MarkerSet set : List.of(areas, labels, roads, seaRoutes, airRoutes, fairways, waypoints)) {
             set.setToggleable(true);
         }
 
-        parseAndAddMarkers(areas, labels, roads, seaRoutes, airRoutes);
+        parseAndAddMarkers(areas, labels, roads, seaRoutes, airRoutes, fairways, waypoints);
 
         updateSet(map, "areas", areas);
         updateSet(map, "labels", labels);
         updateSet(map, "roads", roads);
         updateSet(map, "sea_routes", seaRoutes);
         updateSet(map, "air_routes", airRoutes);
+        updateSet(map, "fairways", fairways);
+        updateSet(map, "waypoints", waypoints);
     }
 
     private void updateSet(BlueMapMap map, String id, MarkerSet set) {
-        if (set.getMarkers().isEmpty()) {
-            map.getMarkerSets().remove(id);
-        } else {
-            map.getMarkerSets().put(id, set);
-        }
+        if (set.getMarkers().isEmpty()) map.getMarkerSets().remove(id);
+        else map.getMarkerSets().put(id, set);
     }
 
     private void parseAndAddMarkers(MarkerSet areas, MarkerSet labels,
-                                    MarkerSet roads, MarkerSet seaRoutes, MarkerSet airRoutes) {
+                                    MarkerSet roads, MarkerSet seaRoutes, MarkerSet airRoutes,
+                                    MarkerSet fairways, MarkerSet waypoints) {
         try {
             List<Map<String, Object>> items = parseItems(cachedJson);
             for (Map<String, Object> item : items) {
@@ -140,10 +153,16 @@ public class MarkerStore {
                         addTextMarker(labels, item);
                     } else if ("road".equals(type)) {
                         addRouteMarker(roads, item, "road");
+                        addNamedWaypoints(waypoints, item);
                     } else if ("sea".equals(type)) {
                         addRouteMarker(seaRoutes, item, "sea");
+                        addNamedWaypoints(waypoints, item);
                     } else if ("air".equals(type)) {
                         addRouteMarker(airRoutes, item, "air");
+                        addNamedWaypoints(waypoints, item);
+                    } else if ("fairway".equals(type)) {
+                        addFairwayMarker(fairways, item);
+                        addNamedWaypoints(waypoints, item);
                     }
                 } catch (RuntimeException error) {
                     BlueMapMarkerTool.LOGGER.warn("[BlueMapMarkerTool] Skipping invalid marker entry", error);

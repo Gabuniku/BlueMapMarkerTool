@@ -560,6 +560,34 @@
         });
         out += "    }\n  }\n";
       }
+      for (const type of Object.keys(ROUTE_TYPES)) {
+        const route = ROUTE_TYPES[type];
+        const items = model.items.filter(i => i.type === type && Array.isArray(i.points) && i.points.length >= 2);
+        if (!items.length) continue;
+        out += "  " + route.setId + ": {\n    label: " + JSON.stringify(route.label) + "\n    toggleable: true\n    markers: {\n";
+        for (const it of items) {
+          const line = it.points.map(p => ({ x: Number(p.x) || 0, y: heightAt(p, it), z: Number(p.z) || 0 }));
+          const pos = bboxCenter(line);
+          const c = hex2rgb(safeHex(it.color, route.color));
+          const detail = esc(it.title || "") + (it.subtitle ? "<br><i>" + esc(it.subtitle) + "</i>" : "");
+          const width = Math.min(30, Math.max(1, Math.round(Number(it.lineWidth) || route.width)));
+          out += "      " + JSON.stringify(it.id) + ": {\n" +
+            "        type: \"line\"\n" +
+            "        label: " + JSON.stringify(it.title || route.name) + "\n" +
+            "        detail: " + JSON.stringify(detail) + "\n" +
+            "        position: { x: " + pos.x + ", y: " + pos.y + ", z: " + pos.z + " }\n" +
+            "        line: [\n" +
+            line.map(p => "          { x: " + p.x + ", y: " + p.y + ", z: " + p.z + " }").join("\n") + "\n" +
+            "        ]\n" +
+            "        line-width: " + width + "\n" +
+            "        line-color: { r: " + c.r + ", g: " + c.g + ", b: " + c.b + ", a: 1.0 }\n" +
+            "        depth-test: false\n" +
+            "        min-distance: " + Math.max(0, Number(it.minDist) || 0) + "\n" +
+            (Number(it.maxDist) > 0 ? "        max-distance: " + Number(it.maxDist) + "\n" : "") +
+            "      }\n";
+        }
+        out += "    }\n  }\n";
+      }
       out += "}\n";
       navigator.clipboard.writeText(out).then(() => msg("Config copied ✓"), () => msg("Copy failed — see console"));
       console.log(out);

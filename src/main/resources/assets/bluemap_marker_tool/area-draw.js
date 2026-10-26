@@ -133,8 +133,17 @@
     }
     function shapeFor(it) { return it.type === "fairway" && it.geometry === "corridor" ? (window.XYNFairwayGeometry?.corridorPolygon(it.points, it.width) || []) : it.points; }
     function buildData() {
-      const sets = { areas: { label: "Areas", toggleable: true, defaultHidden: false, markers: {} }, fairways: { label: "Fairways", toggleable: true, defaultHidden: false, markers: {} } };
+      const sets = { areas: { label: "Areas", toggleable: true, defaultHidden: false, markers: {} }, fairways: { label: "Fairways", toggleable: true, defaultHidden: false, markers: {} }, routes: { label: "Routes", toggleable: true, defaultHidden: false, markers: {} } };
       model.items.forEach((it) => {
+        if (it.type === "route" && it.points.length >= 2) {
+          const color = hex2rgb(it.color), center = centroid(it.points);
+          sets.routes.markers[it.id] = {
+            type: "line", label: it.title, detail: esc(it.subtitle || ""),
+            position: { x: center.x, y: it.y, z: center.z },
+            line: it.points.map(p => ({ x: p.x, y: it.y, z: p.z })),
+            lineWidth: it.lineWidth || 3, lineColor: { ...color, a: 1 }, depthTest: false, listed: true
+          };
+        }
         if (it.type === "fairway") {
           const shape = shapeFor(it);
           if (shape.length >= 3) {
@@ -196,8 +205,8 @@
       while (svg.firstChild) svg.removeChild(svg.firstChild);
       if (!sel || mode === "idle") return;
       const scr = sel.points.map((p) => worldToScreen(p.x, p.z, sel.y));
-      if ((sel.type === "area" || sel.type === "fairway") && scr.length > 1) {
-        const poly = document.createElementNS(NS, (mode === "edit" && (sel.type === "area" || sel.geometry === "polygon")) ? "polygon" : "polyline");
+      if ((sel.type === "area" || sel.type === "fairway" || sel.type === "route") && scr.length > 1) {
+        const poly = document.createElementNS(NS, (mode === "edit" && (sel.type === "area" || (sel.type === "fairway" && sel.geometry === "polygon"))) ? "polygon" : "polyline");
         poly.setAttribute("points", scr.map((s) => s.x + "," + s.y).join(" "));
         poly.setAttribute("fill", "none"); poly.setAttribute("stroke", "#fff");
         poly.setAttribute("stroke-dasharray", "5 4"); poly.setAttribute("stroke-width", "1.5");
@@ -268,7 +277,7 @@
     function insertVertexNear(cx, cy) {
       if (sel.points.length < 2) { sel.points.push(screenToWorld(cx, cy, sel.y)); return; }
       let bestI = 0, bd = Infinity;
-      for (let i = 0; i < (sel.type === "fairway" && sel.geometry === "corridor" ? sel.points.length - 1 : sel.points.length); i++) {
+      for (let i = 0; i < ((sel.type === "route" || (sel.type === "fairway" && sel.geometry === "corridor")) ? sel.points.length - 1 : sel.points.length); i++) {
         const a = worldToScreen(sel.points[i].x, sel.points[i].z, sel.y);
         const b = worldToScreen(sel.points[(i + 1) % sel.points.length].x, sel.points[(i + 1) % sel.points.length].z, sel.y);
         const d = distToSeg(cx, cy, a.x, a.y, b.x, b.y);
@@ -288,9 +297,9 @@
       cv.addEventListener("pointerup", onUp, true);
       cv.addEventListener("pointermove", onHover, false);
       cv.addEventListener("dblclick", (e) => {
-        if (mode !== "edit" || !sel || (sel.type !== "area" && sel.type !== "fairway")) return;
+        if (mode !== "edit" || !sel || (sel.type === "text")) return;
         const vi = nearestVertex(e.clientX, e.clientY);
-        if (vi >= 0 && sel.points.length > (sel.type === "fairway" && sel.geometry === "corridor" ? 2 : 3)) { sel.points.splice(vi, 1); persist(); preview(); refresh(); e.stopPropagation(); e.preventDefault(); }
+        if (vi >= 0 && sel.points.length > ((sel.type === "route" || (sel.type === "fairway" && sel.geometry === "corridor")) ? 2 : 3)) { sel.points.splice(vi, 1); persist(); preview(); refresh(); e.stopPropagation(); e.preventDefault(); }
       }, true);
     })();
 
@@ -320,11 +329,12 @@
 
     function newItem(type) {
       const it = {
-        id: uid(), type, title: type === "area" ? "New Area" : type === "fairway" ? "New Fairway" : "New Label", subtitle: "",
+        id: uid(), type, title: type === "area" ? "New Area" : type === "fairway" ? "New Fairway" : type === "route" ? "New Route" : "New Label", subtitle: "",
         color: type === "area" ? "#4caf50" : "#ffffff", y: 64, points: []
       };
       if (type === "area") it.fill = 0.25;
       else if (type === "fairway") { it.geometry = "corridor"; it.width = 40; it.fill = 0.25; }
+      else if (type === "route") { it.lineWidth = 3; }
       else { it.minDist = 0; it.maxDist = 0; }
       model.items.push(it); sel = it; mode = "draw"; persist(); refresh();
     }
@@ -337,6 +347,7 @@
         <div id="xBody">
           <div style="display:flex;gap:6px;margin-bottom:8px">
             <button id="xNewArea" style="flex:1;background:#396;color:#fff;border:0;border-radius:6px;padding:7px;cursor:pointer">▰ New Area</button>
+            <button id="xNewRoute" style="flex:1;background:#568;color:#fff;border:0;border-radius:6px;padding:7px;cursor:pointer">Route</button>
             <button id="xNewFairway" style="flex:1;background:#268;color:#fff;border:0;border-radius:6px;padding:7px;cursor:pointer">Fairway</button>
             <button id="xNewText" style="flex:1;background:#37c;color:#fff;border:0;border-radius:6px;padding:7px;cursor:pointer">T New Text</button>
           </div>
@@ -350,19 +361,21 @@
       $("xNewArea").onclick = () => newItem("area");
       $("xNewText").onclick = () => newItem("text");
       $("xNewFairway").onclick = () => newItem("fairway");
+      $("xNewRoute").onclick = () => newItem("route");
       $("xExport").onclick = exportConfig;
 
       const E = $("xEdit");
       if (sel) {
         const isArea = sel.type === "area";
         const isFairway = sel.type === "fairway";
+        const isRoute = sel.type === "route";
         E.innerHTML = `
           <div style="border:1px solid #333;border-radius:8px;padding:8px;margin-bottom:6px">
             <div style="font-size:11px;color:#9ab;margin-bottom:4px">${sel.type.toUpperCase()}</div>
             <input id="xTitle" placeholder="Title (e.g. Xynovia)" value="${(sel.title || "").replace(/"/g, "&quot;")}" style="width:100%;box-sizing:border-box;margin-bottom:5px;background:#111;color:#eee;border:1px solid #444;border-radius:5px;padding:6px">
             <input id="xSub" placeholder="Subtitle (e.g. Claimed by Xywren)" value="${(sel.subtitle || "").replace(/"/g, "&quot;")}" style="width:100%;box-sizing:border-box;margin-bottom:6px;background:#111;color:#eee;border:1px solid #444;border-radius:5px;padding:6px">
             <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
-              <label>${isArea || isFairway ? "Colour" : "Text"} <input id="xColor" type="color" value="${sel.color}" style="vertical-align:middle"></label>
+              <label>${isArea || isFairway || isRoute ? "Colour" : "Text"} <input id="xColor" type="color" value="${sel.color}" style="vertical-align:middle"></label>
               <label style="flex:1">Y <input id="xY" type="number" value="${sel.y}" style="width:56px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"></label>
             </div>
             ${isArea || isFairway ? `<label style="display:block;margin-bottom:6px">Fill <input id="xFill" type="range" min="0" max="0.8" step="0.05" value="${sel.fill}" style="vertical-align:middle;width:130px"></label>` : `
@@ -371,10 +384,10 @@
               <label style="display:block;margin-bottom:4px">Min dist <input id="xMinD" type="number" value="${sel.minDist || 0}" style="width:80px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"> <button id="xSetMin" style="background:#444;color:#fff;border:0;border-radius:4px;padding:3px 6px;cursor:pointer">use current</button></label>
               <label style="display:block">Max dist <input id="xMaxD" type="number" value="${sel.maxDist || 0}" style="width:80px;background:#111;color:#eee;border:1px solid #444;border-radius:4px;padding:3px"> <span style="color:#889;font-size:11px">(0 = no limit)</span></label>
             </div>`}
-            <div style="margin-bottom:6px">${isFairway ? '<label>Shape <select id="xGeometry"><option value="corridor">Centerline + width</option><option value="polygon">Polygon</option></select></label><label> Width (blocks) <input id="xWaterWidth" type="number" min="1" style="width:65px" value="' + (sel.width || 40) + '"></label>' : ""}</div>
+            <div style="margin-bottom:6px">${isRoute ? '<label>Line width (px) <input id="xLineWidth" type="number" min="1" max="20" style="width:55px" value="' + (sel.lineWidth || 3) + '"></label>' : isFairway ? '<label>Shape <select id="xGeometry"><option value="corridor">Centerline + width</option><option value="polygon">Polygon</option></select></label><label> Width (blocks) <input id="xWaterWidth" type="number" min="1" style="width:65px" value="' + (sel.width || 40) + '"></label>' : ""}</div>
             <div style="display:flex;gap:6px">
-              <button id="xDraw" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "draw" ? "#396" : "#444"};color:#fff">${isArea || isFairway ? "✚ Draw" : "✚ Place"}</button>
-              <button id="xEditM" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "edit" ? "#396" : "#444"};color:#fff">${isArea || isFairway ? "✎ Edit" : "✎ Move"}</button>
+              <button id="xDraw" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "draw" ? "#396" : "#444"};color:#fff">${isArea || isFairway || isRoute ? "✚ Draw" : "✚ Place"}</button>
+              <button id="xEditM" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:${mode === "edit" ? "#396" : "#444"};color:#fff">${isArea || isFairway || isRoute ? "✎ Edit" : "✎ Move"}</button>
               <button id="xDone" style="flex:1;border:0;border-radius:5px;padding:6px;cursor:pointer;background:#444;color:#fff">✓ Done</button>
             </div>
             <div style="font-size:11px;color:#889;margin-top:5px">${sel.points.length} point${sel.points.length === 1 ? "" : "s"}${mode === "draw" ? (isArea ? " · click map to add corners" : " · click map to place") : mode === "edit" ? (isArea ? " · drag/insert · dbl-click to delete" : " · drag to move") : ""}</div>
@@ -386,12 +399,13 @@
         on("xY", "onchange", (e) => { sel.y = parseInt(e.target.value) || 64; persist(); preview(); });
         on("xGeometry", "onchange", (e) => { sel.geometry = e.target.value; persist(); preview(); refresh(); });
         const shapeSelect = $("xGeometry"); if (shapeSelect) shapeSelect.value = sel.geometry || "corridor";
+        on("xLineWidth", "onchange", (e) => { sel.lineWidth = Math.max(1, Number(e.target.value) || 3); persist(); preview(); });
         on("xWaterWidth", "onchange", (e) => { sel.width = Math.max(1, Number(e.target.value) || 40); persist(); preview(); });
         on("xFill", "oninput", (e) => { sel.fill = parseFloat(e.target.value); persist(); preview(); });
         on("xMinD", "onchange", (e) => { sel.minDist = parseInt(e.target.value) || 0; persist(); preview(); });
         on("xMaxD", "onchange", (e) => { sel.maxDist = parseInt(e.target.value) || 0; persist(); preview(); });
         on("xSetMin", "onclick", () => { sel.minDist = viewDistance(); persist(); preview(); refresh(); });
-        if (sel.type === "fairway" && sel.points.length) {
+        if ((sel.type === "fairway" || sel.type === "route") && sel.points.length) {
           const names = document.createElement("div");
           names.style.cssText = "max-height:130px;overflow:auto;margin:6px 0";
           sel.points.forEach((pt, i) => {
@@ -419,7 +433,7 @@
         `<div data-id="${it.id}" style="display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;cursor:pointer;background:${sel && sel.id === it.id ? "#2a3340" : "transparent"}">
           <span style="width:11px;height:11px;border-radius:${it.type === "area" ? "2px" : "50%"};background:${it.color};display:inline-block;border:1px solid #0006"></span>
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.title)}</span>
-          <span style="color:#789;font-size:11px">${it.type === "area" ? "Area" : it.type === "fairway" ? "Fairway" : "Text"}</span>
+          <span style="color:#789;font-size:11px">${it.type === "area" ? "Area" : it.type === "fairway" ? "Fairway" : it.type === "route" ? "Route" : "Text"}</span>
           <span data-del="${it.id}" style="color:#f88;cursor:pointer">✕</span>
         </div>`).join("") || '<i style="color:#778">Nothing yet — add an Area or Text.</i>';
       L.querySelectorAll("[data-id]").forEach((el) => el.onclick = (ev) => {

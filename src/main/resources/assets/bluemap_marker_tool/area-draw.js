@@ -22,7 +22,9 @@
       .then(r => r.ok ? r.json() : null)
       .then(cfg => {
         if (cfg && cfg.apiPort) {
-          API_URL = "http://" + window.location.hostname + ":" + cfg.apiPort + "/xyn/markers";
+          API_URL = window.location.protocol === "https:"
+            ? window.location.origin + "/xyn/markers"
+            : "http://" + window.location.hostname + ":" + cfg.apiPort + "/xyn/markers";
           loadFromServer();
         }
       })

@@ -29,6 +29,8 @@ jobs:
       - name: Test marker editor
         run: |
           node --check src/main/resources/assets/bluemap_marker_tool/area-draw.js
+          node --check src/main/resources/assets/bluemap_marker_tool/fairway-geometry.js
+          node tests/fairway-geometry.test.cjs
           node tests/editor-smoke.cjs
 
       - name: Build with Gradle

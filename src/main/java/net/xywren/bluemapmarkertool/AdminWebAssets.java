@@ -19,10 +19,12 @@ public final class AdminWebAssets {
                 Files.createDirectories(webRoot);
 
                 deploy(webRoot, "fairway-geometry.js");
+                deploy(webRoot, "fairway-network.js");
                 deploy(webRoot, "admin-menu.js");
                 deploy(webRoot, "text-markers.js"); // overwrite legacy webroot file with a no-op
 
                 api.getWebApp().registerScript("fairway-geometry.js?v=" + BlueMapMarkerTool.VERSION);
+                api.getWebApp().registerScript("fairway-network.js?v=" + BlueMapMarkerTool.VERSION);
                 api.getWebApp().registerScript("admin-menu.js?v=" + BlueMapMarkerTool.VERSION);
                 BlueMapMarkerTool.LOGGER.info("[BlueMapMarkerTool] Administrator web asset deployed.");
             } catch (IOException e) {

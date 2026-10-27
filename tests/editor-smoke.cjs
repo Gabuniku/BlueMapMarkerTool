@@ -216,9 +216,10 @@ async function main() {
 
   // A fresh fairway snaps to the existing second node rather than duplicating it.
   newFairway.onclick();
-  clickMap(452, 258);
+  clickMap(452, 281); // near the visible second waypoint in the mocked projection
   doc = writes.at(-1);
   assert.equal(doc.items.at(-1).points.length, 1);
+  assert(doc.items.at(-1).points[0].nodeId, "expected actual snap, not undefined === undefined");
   assert.equal(doc.items.at(-1).points[0].nodeId, doc.items.at(-3).points[1].nodeId);
   clickMap(730);
   doc = writes.at(-1);

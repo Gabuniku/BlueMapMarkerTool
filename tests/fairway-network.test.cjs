@@ -26,7 +26,7 @@ assert.equal(graph.nodes.length, 4);
 assert.equal(graph.edges[0].to, graph.edges[2].from);
 assert.equal(graph.edges[1].from, graph.edges[2].from);
 assert.equal(graph.edges[2].width, 40);
-first.points[1].x = 110;
+assert.equal(net.moveNode(items, first.points[1], 110, 0), true);
 first.points[1].name = 'East Junction';
 assert.equal(net.propagate(items, first.points[1]), 1);
 assert.equal(branch.points[0].x, 110);
@@ -44,8 +44,7 @@ assert.equal(join.nodeId, branch.points[1].nodeId);
 graph = net.buildGraph(items);
 assert.equal(graph.edges.length, 4);
 assert.equal(graph.nodes.length, 5);
-branch.points[1].z = 150;
-net.propagate(items, branch.points[1]);
+assert.equal(net.moveNode(items, branch.points[1], 100, 150), true);
 assert.equal(second.points[1].z, 150);
 assert.equal(net.createBranch(items, { type: "fairway", geometry: "polygon", points: [{x:0,z:0}] }, 0, uid), null);
 
@@ -91,5 +90,35 @@ polygon.points[0].name = "Independent polygon waypoint";
 assert.equal(net.propagate([polygon, first, branch], polygon.points[0]), 0);
 assert.equal(first.points[1].name, otherJunctionName);
 assert.equal(net.detachPolygon(polygon), 0, "detach should be idempotent");
+
+// Regression: moving a *shared* junction must validate every touched corridor.
+// The main channel A-B-C reverses direction when B is moved past C.
+const main = { id: "main", type: "fairway", geometry: "corridor", width: 40,
+  points: [{ id: "A", x: 0, z: 0 }, { id: "B", nodeId: "B", x: 100, z: 0 },
+           { id: "C", x: 200, z: 0 }] };
+const offshoot = { id: "offshoot", type: "fairway", geometry: "corridor", width: 40,
+  points: [{ id: "B2", nodeId: "B", x: 100, z: 0 }, { id: "D", x: 100, z: 100 }] };
+const graphItems = [main, offshoot], beforeInvalid = JSON.stringify(graphItems);
+assert.equal(net.moveNode(graphItems, offshoot.points[0], 210, 0), false);
+assert.equal(JSON.stringify(graphItems), beforeInvalid,
+  "invalid shared move must reject atomically with no changes");
+assert.equal(net.moveNode(graphItems, offshoot.points[0], NaN, 12), false);
+assert.equal(JSON.stringify(graphItems), beforeInvalid);
+assert.equal(net.moveNode(graphItems, offshoot.points[0], 110, 20), true);
+assert.equal(main.points[1].x, 110);
+assert.equal(main.points[1].z, 20);
+assert.equal(offshoot.points[0].x, 110);
+assert.equal(offshoot.points[0].z, 20);
+assert.equal(net.moveNode(graphItems, offshoot.points[0], 210, 0), false);
+assert.equal(main.points[1].x, 110);
+assert.equal(offshoot.points[0].x, 110);
+
+// Single-point branches have no polygon until their second point arrives.
+const onePoint = { id: "new", type: "fairway", geometry: "corridor", width: 40,
+  points: [{ id: "shared-new", nodeId: "B", x: 110, z: 20 }] };
+assert.equal(net.moveNode([...graphItems, onePoint], onePoint.points[0], 120, 10), true);
+assert.equal(main.points[1].x, 120);
+assert.equal(offshoot.points[0].x, 120);
+assert.equal(onePoint.points[0].x, 120);
 
 console.log("Branching fairway network tests: PASS");

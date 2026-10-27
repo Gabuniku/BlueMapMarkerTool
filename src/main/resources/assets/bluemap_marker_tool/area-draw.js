@@ -115,7 +115,7 @@
     function worldToScreen(x, z, y) {
       const v = new Vec3(x, y, z); v.project(getCam());
       const r = getCanvas().getBoundingClientRect();
-      return { x: (v.x * 0.5 + 0.5) * r.width + r.left, y: (-v.y * 0.5 + 0.5) * r.height + r.top, vis: v.z < 1 };
+      return { x: (v.x * 0.5 + 0.5) * r.width + r.left, y: (-v.y * 0.5 + 0.5) * r.height + r.top, vis: v.z >= -1 && v.z <= 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1 };
     }
     function viewDistance() {
       const c = screenToWorld(innerWidth / 2, innerHeight / 2, 0);
@@ -376,8 +376,11 @@
           const point = isRoute(sel.type) ? { ...pos, y: sel.y } : pos;
           if (sel.type === "fairway" && sel.geometry !== "polygon" && network) {
             const nearby = network.findNearbyNode(model.items, sel, e.clientX, e.clientY,
-              (p, item) => worldToScreen(p.x, p.z, item.y));
-            if (nearby) network.connectPoint(model.items, sel, nearby, uid);
+              (p, item) => worldToScreen(p.x, p.z, item.y), pos);
+            if (nearby) {
+              if (!network.connectPoint(model.items, sel, nearby, uid))
+                msg("Connection rejected: duplicate node or invalid corridor");
+            }
             else sel.points.push({ ...point, id: uid(), name: "" });
           } else sel.points.push(isWaypointType(sel.type) ? { ...point, id: uid(), name: "" } : point);
         }
@@ -591,7 +594,10 @@
         on("xSetMin", "onclick", () => { sel.minDist = viewDistance(); persist(); preview(); refresh(); });
         if (isFairway) {
           on("xGeometry", "onchange", (e) => {
-            sel.geometry = e.target.value === "polygon" ? "polygon" : "corridor";
+            const newGeometry = e.target.value === "polygon" ? "polygon" : "corridor";
+            if (newGeometry === "polygon" && sel.geometry !== "polygon" && network)
+              network.detachPolygon(sel);
+            sel.geometry = newGeometry;
             persist(); preview(); refresh();
           });
           on("xFairwayWidth", "onchange", (e) => {

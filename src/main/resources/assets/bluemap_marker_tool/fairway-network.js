@@ -2,11 +2,25 @@
 (function (root) {
   "use strict";
 
+  const geometry = root.XYNFairwayGeometry || (typeof require === "function" ? require("./fairway-geometry.js") : null);
   const corridor = item => item?.type === "fairway" && item.geometry !== "polygon" && Array.isArray(item.points);
 
   function ensureNodeId(point, nextId) {
     if (!point.nodeId) point.nodeId = nextId();
     return point.nodeId;
+  }
+
+  // A polygon is an independent region, not a node in the centerline network.
+  function detachPolygon(item) {
+    if (item?.type !== "fairway" || !Array.isArray(item.points)) return 0;
+    let detached = 0;
+    for (const point of item.points) {
+      if (Object.prototype.hasOwnProperty.call(point, "nodeId")) {
+        delete point.nodeId;
+        detached++;
+      }
+    }
+    return detached;
   }
 
   function createBranch(items, item, index, nextId) {
@@ -23,13 +37,18 @@
     return branch;
   }
 
-  function findNearbyNode(items, current, screenX, screenY, project, radius = 14) {
+  function findNearbyNode(items, current, screenX, screenY, project, cursorWorld, radius = 14, worldLimit = 32) {
+    if (!cursorWorld || !Number.isFinite(cursorWorld.x) || !Number.isFinite(cursorWorld.z)) return null;
     let best = null, distance = radius;
     for (const item of items) {
       if (!corridor(item) || item === current) continue;
       for (const point of item.points) {
         const loc = project(point, item);
-        if (!loc || !Number.isFinite(loc.x) || !Number.isFinite(loc.y)) continue;
+        // Perspective projection alone can place behind-camera and off-screen
+        // nodes close to a click. Both visibility and real-world reach are required.
+        if (!loc || loc.vis !== true || !Number.isFinite(loc.x) || !Number.isFinite(loc.y)) continue;
+        if (!Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.z))) continue;
+        if (Math.hypot(Number(point.x) - cursorWorld.x, Number(point.z) - cursorWorld.z) > worldLimit) continue;
         const delta = Math.hypot(screenX - loc.x, screenY - loc.y);
         if (delta <= distance) { best = point; distance = delta; }
       }
@@ -39,20 +58,27 @@
 
   function connectPoint(items, target, other, nextId) {
     if (!corridor(target) || !other) return null;
+    const x = Number(other.x), z = Number(other.z);
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+    // Reject *any* repeated junction or coordinate, not just a repeated endpoint.
+    // In particular an A -> B -> A path must never erase an existing Fairway.
+    if (target.points.some(point =>
+      (other.nodeId && point.nodeId === other.nodeId) ||
+      Math.hypot(Number(point.x) - x, Number(point.z) - z) < 1e-6
+    )) return null;
+    const tentative = [...target.points, { x, z }];
+    // Validate BEFORE assigning IDs or pushing. Rejection is side-effect free.
+    if (tentative.length >= 2 &&
+        (!geometry || !geometry.corridorPolygon(tentative, Number(target.width ?? 40)).length)) return null;
     const nodeId = ensureNodeId(other, nextId);
-    const point = {
-      id: nextId(), nodeId, name: other.name || "",
-      x: Number(other.x), z: Number(other.z)
-    };
-    const previous = target.points.at(-1);
-    if (previous && Math.hypot(Number(previous.x) - point.x, Number(previous.z) - point.z) < 1e-6) return null;
-    if (previous?.nodeId && previous.nodeId === nodeId) return null;
+    const point = { id: nextId(), nodeId, name: other.name || "", x, z };
     target.points.push(point);
     return point;
   }
 
   function propagate(items, source) {
-    if (!source?.nodeId) return 0;
+    // Ignore stale nodeIds on legacy polygon entries as well as detached nodes.
+    if (!source?.nodeId || !items.some(item => corridor(item) && item.points.includes(source))) return 0;
     let changes = 0;
     for (const item of items) {
       if (!corridor(item)) continue;
@@ -89,7 +115,7 @@
     return { nodes: [...nodes.values()], edges };
   }
 
-  const api = Object.freeze({ corridor, ensureNodeId, createBranch, findNearbyNode, connectPoint, propagate, buildGraph });
+  const api = Object.freeze({ corridor, detachPolygon, ensureNodeId, createBranch, findNearbyNode, connectPoint, propagate, buildGraph });
   root.XYNFairwayNetwork = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

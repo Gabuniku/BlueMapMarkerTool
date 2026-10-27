@@ -224,7 +224,30 @@ async function main() {
   doc = writes.at(-1);
   assert.equal(doc.items.at(-1).points.length, 2);
   assert.equal(network.buildGraph(doc.items).edges.length >= 3, true);
-  console.log("Marker editor, fairway branching, and waypoint smoke tests: PASS");
+  // Switching an actively connected corridor to Polygon breaks only this
+  // fairway's junction links. Local IDs, names and coordinates must survive.
+  const beforeSwitch = writes.at(-1).items.at(-1).points
+    .map(p => ({ id: p.id, name: p.name, x: p.x, z: p.z }));
+  const linkedId = writes.at(-1).items.at(-1).points[0].nodeId;
+  assert(linkedId);
+  const linkedOriginal = writes.at(-1).items.at(-3).points[1].name;
+  panel.querySelector("#xGeometry").onchange({ target: { value: "polygon" } });
+  doc = writes.at(-1);
+  assert.equal(doc.items.at(-1).geometry, "polygon");
+  assert(doc.items.at(-1).points.every(p => !("nodeId" in p)));
+  assert.deepEqual(doc.items.at(-1).points.map(p => ({
+    id: p.id, name: p.name, x: p.x, z: p.z
+  })), beforeSwitch);
+  assert.equal(doc.items.at(-3).points[1].nodeId, linkedId);
+  const detachedName = editor.querySelectorAll("[data-route-name]")[0];
+  detachedName.value = "Independent harbor boundary";
+  detachedName.onchange();
+  doc = writes.at(-1);
+  assert.equal(doc.items.at(-1).points[0].name, detachedName.value);
+  assert.equal(doc.items.at(-3).points[1].name, linkedOriginal);
+  assert.equal(network.buildGraph(doc.items).nodes.some(node => node.name === detachedName.value), false);
+
+  console.log("Marker editor, fairway branching, snapping safety, and polygon detach tests: PASS");
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

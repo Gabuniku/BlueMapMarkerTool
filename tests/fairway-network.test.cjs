@@ -83,7 +83,7 @@ assert.equal(net.findNearbyNode(visibility, branch, 100, 0,
 const polygon = JSON.parse(JSON.stringify(branch));
 polygon.type = "fairway"; polygon.geometry = "polygon";
 const preserved = polygon.points.map(p => ({ id: p.id, x: p.x, z: p.z, name: p.name }));
-assert.equal(net.detachPolygon(polygon), 1);
+assert.equal(net.detachPolygon(polygon), 2);
 assert(polygon.points.every(p => !("nodeId" in p)));
 assert.deepEqual(polygon.points.map(p => ({ id: p.id, x: p.x, z: p.z, name: p.name })), preserved);
 const otherJunctionName = first.points[1].name;

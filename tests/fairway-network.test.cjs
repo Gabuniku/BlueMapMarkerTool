@@ -137,7 +137,7 @@ let pick = net.findScreenNode(screenItems, 24, 21, project);
 assert.equal(pick.item.id, "visible");
 assert.equal(pick.index, 1);
 assert.equal(pick.point, screenItems[2].points[1]);
-assert.equal(net.findScreenNode(screenItems, 30, 30, project), null,
+assert.equal(net.findScreenNode(screenItems, 30, 30, project, 4), null,
   "off-category and invisible points must be excluded");
 assert.equal(net.findScreenNode(screenItems, 200, 200, project), null,
   "an empty map click must not pick a distant node");

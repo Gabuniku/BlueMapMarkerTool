@@ -248,7 +248,64 @@ async function main() {
   assert.equal(doc.items.at(-3).points[1].name, linkedOriginal);
   assert.equal(network.buildGraph(doc.items).nodes.some(node => node.name === detachedName.value), false);
 
-  console.log("Marker editor, fairway branching, snapping safety, and polygon detach tests: PASS");
+  // Browser regression: two connected centerlines must survive an invalid drag.
+  // Use a separate water plane far enough from previous fairways to avoid snapping.
+  newFairway.onclick();
+  clickMap(320, 450); clickMap(380, 450); clickMap(440, 450);
+  let scene = writes.at(-1);
+  const mainCorridor = scene.items.at(-1);
+  assert.equal(mainCorridor.points.length, 3);
+  const mainB = mainCorridor.points[1], mainC = mainCorridor.points[2];
+  const fromMain = editor.querySelectorAll("[data-route-branch]");
+  assert.equal(fromMain.length, 3);
+  fromMain[1].onclick();
+  clickMap(500, 520);
+  scene = writes.at(-1);
+  const branchCorridor = scene.items.at(-1);
+  assert.equal(branchCorridor.points.length, 2);
+  assert.equal(branchCorridor.points[0].nodeId, mainB.nodeId);
+  const stable = JSON.stringify(scene.items);
+  const writeCount = writes.length;
+
+  panel.querySelector("#xEditM").onclick();
+  // Mocked worldToScreen: x=400 + 0.4 * worldX, y=300 - 0.3 * Y.
+  const clickJunction = {
+    button: 0, clientX: 400 + 0.4 * mainB.x, clientY: 300 - 0.3 * branchCorridor.y,
+    target: canvas, stopPropagation() {}, preventDefault() {}
+  };
+  for (const cb of canvas.listeners.pointerdown || []) cb(clickJunction);
+  const invalidDrag = {
+    ...clickJunction, clientX: 720, clientY: 450
+  };
+  for (const cb of canvas.listeners.pointermove || []) cb(invalidDrag);
+  assert.equal(JSON.stringify(writes.at(-1).items), stable, "no invalid intermediate save");
+  for (const cb of canvas.listeners.pointerup || []) cb(invalidDrag);
+  assert.equal(writes.length, writeCount, "failed drag must not persist");
+  assert.equal(JSON.stringify(writes.at(-1).items), stable, "failed drag must be atomic");
+
+  // Valid drag must synchronize the same node in main and branch.
+  for (const cb of canvas.listeners.pointerdown || []) cb(clickJunction);
+  const goodDrag = { ...clickJunction, clientX: 367, clientY: 450 };
+  for (const cb of canvas.listeners.pointermove || []) cb(goodDrag);
+  for (const cb of canvas.listeners.pointerup || []) cb(goodDrag);
+  scene = writes.at(-1);
+  assert.equal(scene.items.at(-2).points[1].x, scene.items.at(-1).points[0].x);
+  assert.notEqual(scene.items.at(-2).points[1].x, mainB.x, "valid drag should change junction");
+  assert.equal(scene.items.at(-2).points[1].z, scene.items.at(-1).points[0].z);
+
+  // Numeric coordinate edit is also atomic, with no save on rejection.
+  const coords = editor.querySelectorAll("[data-route-axis]");
+  const branchX = coords.find(el => el.dataset.routeIdx === "0" && el.dataset.routeAxis === "x");
+  assert(branchX);
+  const currentX = scene.items.at(-1).points[0].x;
+  const saves = writes.length;
+  branchX.value = String(mainC.x + 100);
+  branchX.onchange();
+  assert.equal(writes.length, saves);
+  assert.equal(branchX.value, currentX, "rejected numeric edit must restore input");
+  assert.equal(writes.at(-1).items.at(-2).points[1].x, currentX);
+
+  console.log("Marker editor, fairway branching, polygon detach, and atomic shared drag tests: PASS");
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

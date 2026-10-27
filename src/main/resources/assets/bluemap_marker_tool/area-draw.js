@@ -115,7 +115,7 @@
     function worldToScreen(x, z, y) {
       const v = new Vec3(x, y, z); v.project(getCam());
       const r = getCanvas().getBoundingClientRect();
-      return { x: (v.x * 0.5 + 0.5) * r.width + r.left, y: (-v.y * 0.5 + 0.5) * r.height + r.top, vis: v.z < 1 };
+      return { x: (v.x * 0.5 + 0.5) * r.width + r.left, y: (-v.y * 0.5 + 0.5) * r.height + r.top, vis: v.z >= -1 && v.z <= 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1 };
     }
     function viewDistance() {
       const c = screenToWorld(innerWidth / 2, innerHeight / 2, 0);
@@ -129,6 +129,7 @@
       sea: { setId: "sea_routes", label: "Sea Routes", name: "Sea Route", color: "#259cfa", width: 4, defaultY: 63 },
       air: { setId: "air_routes", label: "Air Routes", name: "Air Route", color: "#bf85f7", width: 3, defaultY: 160 }
     });
+    const network = window.XYNFairwayNetwork;
     const TOOL_SETS = ["areas", "labels", "roads", "sea_routes", "air_routes", "fairways", "waypoints"];
     function isRoute(type) { return Object.prototype.hasOwnProperty.call(ROUTE_TYPES, type); }
     function isWaypointType(type) { return isRoute(type) || type === "fairway"; }
@@ -252,7 +253,10 @@
               'border-radius:5px;padding:3px 6px;font:12px system-ui,sans-serif;' +
               'text-shadow:0 1px 2px #000;pointer-events:none">' +
               '<span style="color:#a9e3ff">●</span> ' + esc(name) + '</span>';
-            sets.waypoints.markers[String(it.id) + "-wp-" + id] = {
+            const markerId = it.type === "fairway" && it.geometry !== "polygon" && p.nodeId
+              ? "shared-wp-" + String(p.nodeId).replace(/[^a-zA-Z0-9_-]/g, "_")
+              : String(it.id) + "-wp-" + id;
+            sets.waypoints.markers[markerId] = {
               type: "html", label: name,
               position: { x: Number(p.x) || 0, y, z: Number(p.z) || 0 },
               anchor: { x: 0, y: 0 }, html, classes: [],
@@ -299,7 +303,7 @@
       scr.forEach((s, i) => {
         const c = document.createElementNS(NS, "circle");
         c.setAttribute("cx", s.x); c.setAttribute("cy", s.y); c.setAttribute("r", i === dragIdx ? 8 : 6);
-        c.setAttribute("fill", sel.color); c.setAttribute("stroke", "#000"); c.setAttribute("stroke-width", "2");
+        c.setAttribute("fill", sel.points[i].nodeId ? "#ffd166" : sel.color); c.setAttribute("stroke", "#000"); c.setAttribute("stroke-width", "2");
         svg.appendChild(c);
       });
     }
@@ -337,6 +341,7 @@
 
     // ---- canvas pointer handling ----
     let downXY = null;
+    let dragStart = null, dragDirty = false, dragRejected = false;
     function nearestVertex(cx, cy) {
       if (!sel) return -1;
       let best = -1, bd = 12;
@@ -346,21 +351,50 @@
     function onDown(e) {
       if (e.button !== 0 || mode === "idle") return;
       downXY = { x: e.clientX, y: e.clientY };
-      if (mode === "edit") { const vi = nearestVertex(e.clientX, e.clientY); if (vi >= 0) { dragIdx = vi; e.stopPropagation(); e.preventDefault(); } }
+      if (mode === "edit") {
+        const vi = nearestVertex(e.clientX, e.clientY);
+        if (vi >= 0) {
+          dragIdx = vi;
+          const point = sel.points[vi];
+          dragStart = { x: point.x, z: point.z };
+          dragDirty = false; dragRejected = false;
+          e.stopPropagation(); e.preventDefault();
+        }
+      }
     }
     function onMove(e) {
       if (dragIdx >= 0 && sel) {
+        e.stopPropagation();
+        if (dragRejected) return;
         const old = sel.points[dragIdx];
         const y = isRoute(sel.type) ? heightAt(old, sel) : sel.y;
         const pos = screenToWorld(e.clientX, e.clientY, y);
-        // Preserve waypoint IDs, names and per-point altitude while moving vertices.
-        sel.points[dragIdx] = { ...old, x: pos.x, z: pos.z };
+        if (sel.type === "fairway" && sel.geometry !== "polygon" && network) {
+          if (!network.moveNode(model.items, old, pos.x, pos.z)) {
+            // An invalid drag cancels the entire gesture, including previously
+            // valid intermediate positions; never persist a partial movement.
+            if (dragDirty && dragStart) network.moveNode(model.items, old, dragStart.x, dragStart.z);
+            dragDirty = false;
+            dragRejected = true;
+            preview();
+            msg("Junction movement rejected: another Fairway would become invalid");
+            return;
+          }
+        } else {
+          // Preserve waypoint IDs, names and altitude in non-network markers.
+          sel.points[dragIdx] = { ...old, x: pos.x, z: pos.z };
+        }
+        dragDirty = true;
         preview();
-        e.stopPropagation();
       }
     }
     function onUp(e) {
-      if (dragIdx >= 0) { dragIdx = -1; persist(); refresh(); e.stopPropagation(); downXY = null; return; }
+      if (dragIdx >= 0) {
+        dragIdx = -1;
+        if (dragDirty && !dragRejected) persist();
+        dragStart = null; dragDirty = false; dragRejected = false;
+        refresh(); e.stopPropagation(); downXY = null; return;
+      }
       if (!downXY || e.button !== 0 || mode === "idle") { downXY = null; return; }
       const moved = Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y); downXY = null;
       if (moved > 6 || e.target !== getCanvas() || !sel) return;
@@ -369,7 +403,15 @@
         else {
           const pos = screenToWorld(e.clientX, e.clientY, sel.y);
           const point = isRoute(sel.type) ? { ...pos, y: sel.y } : pos;
-          sel.points.push(isWaypointType(sel.type) ? { ...point, id: uid(), name: "" } : point);
+          if (sel.type === "fairway" && sel.geometry !== "polygon" && network) {
+            const nearby = network.findNearbyNode(model.items, sel, e.clientX, e.clientY,
+              (p, item) => worldToScreen(p.x, p.z, item.y), pos);
+            if (nearby) {
+              if (!network.connectPoint(model.items, sel, nearby, uid))
+                msg("Connection rejected: duplicate node or invalid corridor");
+            }
+            else sel.points.push({ ...point, id: uid(), name: "" });
+          } else sel.points.push(isWaypointType(sel.type) ? { ...point, id: uid(), name: "" } : point);
         }
       } else if (mode === "edit" && (sel.type === "area" || isWaypointType(sel.type))) insertVertexNear(e.clientX, e.clientY);
       persist(); preview(); refresh();
@@ -482,7 +524,12 @@
         }
         html += '<button data-route-up="' + idx + '" title="Move waypoint up">↑</button>';
         html += '<button data-route-down="' + idx + '" title="Move waypoint down">↓</button>';
-        html += '<button data-route-del="' + idx + '" title="Delete waypoint">×</button></div>';
+        html += '<button data-route-del="' + idx + '" title="Delete waypoint">×</button>';
+        if (item.type === "fairway" && item.geometry !== "polygon") {
+          html += '<button data-route-branch="' + idx + '" title="Draw a branch from this waypoint">Branch</button>';
+          if (p.nodeId) html += '<span title="Shared junction" style="color:#ffd166">●</span>';
+        }
+        html += "</div>";
         html += '<label style="display:block;margin:4px 0 0 18px;font-size:11px;color:#9ab">Name ' +
           '<input data-route-name="' + idx + '" placeholder="Optional waypoint name" value="' +
           escAttr(p.name || "") +
@@ -520,6 +567,7 @@
           <div id="xEdit"></div>
           <div style="font-size:12px;margin:6px 0 3px;color:#9ab">Markers</div>
           <div id="xList" style="max-height:150px;overflow:auto;font-size:12px"></div>
+          <button id="xGraphExport" style="width:100%;margin-top:5px;background:#345;color:#fff;border:0;border-radius:6px;padding:7px;cursor:pointer">Copy Fairway Graph JSON</button>
           <button id="xExport" style="width:100%;margin-top:8px;background:#456;color:#fff;border:0;border-radius:6px;padding:7px;cursor:pointer">📋 Copy BlueMap config</button>
           <div id="xMsg" style="font-size:11px;color:#9cf;min-height:14px;margin-top:5px"></div>
         </div>`;
@@ -531,6 +579,11 @@
       $("xNewAir").onclick = () => newItem("air");
       $("xNewFairway").onclick = () => newItem("fairway");
       $("xExport").onclick = exportConfig;
+      $("xGraphExport").onclick = () => {
+        if (!network) return msg("Network helper is unavailable");
+        navigator.clipboard.writeText(JSON.stringify(network.buildGraph(model.items), null, 2))
+          .then(() => msg("Graph copied ✓"), () => msg("Graph copy failed"));
+      };
 
       const E = $("xEdit");
       if (sel) {
@@ -570,7 +623,10 @@
         on("xSetMin", "onclick", () => { sel.minDist = viewDistance(); persist(); preview(); refresh(); });
         if (isFairway) {
           on("xGeometry", "onchange", (e) => {
-            sel.geometry = e.target.value === "polygon" ? "polygon" : "corridor";
+            const newGeometry = e.target.value === "polygon" ? "polygon" : "corridor";
+            if (newGeometry === "polygon" && sel.geometry !== "polygon" && network)
+              network.detachPolygon(sel);
+            sel.geometry = newGeometry;
             persist(); preview(); refresh();
           });
           on("xFairwayWidth", "onchange", (e) => {
@@ -594,7 +650,17 @@
               if (!sel.points[idx] || !["x", "y", "z"].includes(axis)) return;
               const n = Number(input.value);
               if (!Number.isFinite(n)) return;
-              sel.points[idx][axis] = n;
+              const point = sel.points[idx];
+              if ((axis === "x" || axis === "z") &&
+                  sel.type === "fairway" && sel.geometry !== "polygon" && network) {
+                const x = axis === "x" ? n : Number(point.x);
+                const z = axis === "z" ? n : Number(point.z);
+                if (!network.moveNode(model.items, point, x, z)) {
+                  input.value = point[axis];
+                  msg("Junction movement rejected: another Fairway would become invalid");
+                  return;
+                }
+              } else point[axis] = n;
               persist(); preview();
             };
           });
@@ -605,9 +671,22 @@
               if (!point) return;
               if (!point.id) point.id = uid();
               point.name = input.value;
+              if (sel.type === "fairway" && network) network.propagate(model.items, point);
               persist(); preview();
             };
           });
+          if (sel.type === "fairway" && sel.geometry !== "polygon" && network) {
+            E.querySelectorAll("[data-route-branch]").forEach((btn) => {
+              btn.onclick = () => {
+                const index = Number(btn.dataset.routeBranch);
+                const branch = network.createBranch(model.items, sel, index, uid);
+                if (!branch) return;
+                sel = branch; mode = "draw";
+                persist(); preview(); refresh();
+                msg("Click map to continue branch; click near a waypoint to connect.");
+              };
+            });
+          }
           for (const action of ["up", "down", "del"]) {
             E.querySelectorAll("[data-route-" + action + "]").forEach((btn) => {
               btn.onclick = () => {

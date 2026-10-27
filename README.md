@@ -112,3 +112,37 @@ Use `"geometry": "polygon"` to interpret the fairway's point array as the bounda
 ## Credits
 
 Uses [BlueMap](https://github.com/BlueMap-Minecraft/BlueMap) by BlueColored and contributors.
+
+
+## Branching fairway network (experimental)
+
+Fairway **Centerline + width** can now form a connected, branching waterway
+network instead of requiring a single continuous stroke.
+
+1. Create a **New Fairway**, draw at least two points and name junctions if needed.
+2. In its waypoint list, click **Branch** next to any waypoint. This makes a new
+   Fairway corridor starting at that exact point, retaining the parent channel's
+   width, color and Y setting.
+3. Click the map to add more points. Clicking within ~14 screen pixels of an
+   existing centerline Fairway waypoint connects the new corridor to that node
+   instead of adding an unrelated point.
+4. Shared junctions are highlighted in gold when editing. Moving or renaming a
+   connected waypoint updates the corresponding points in other corridor
+   Fairways. The Waypoints layer renders a shared named junction only once.
+5. Use **Copy Fairway Graph JSON** to export an adjacency-ready collection of
+   `nodes` and `edges` including the source Fairway IDs and channel widths.
+
+New connections use a `nodeId` field on the existing `points` records. The
+original per-point `id`, name, coordinates and existing marker JSON format are
+preserved. Older unconnected corridors stay separate until joined explicitly;
+polygon Fairways remain independent navigable regions. Segments are independent
+Fairway records, allowing branches to have different widths and styles. Deleting
+a point or a branch only removes its occurrence in that particular Fairway.
+
+**Limitations:** This is a geometric and topological map annotation, not a
+route-finding or navigational safety model. No automatic detection of water depth,
+shore collision, or line-to-line crossing is performed. Crossed lines are only
+connected when they explicitly share a junction node. A shared point currently
+synchronizes X/Z position and name; the rendering height is still set per
+Fairway. If two existing channels merely overlap, use the Branch or snap action
+to link them intentionally.

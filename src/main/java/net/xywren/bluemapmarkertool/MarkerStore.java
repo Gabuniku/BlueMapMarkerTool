@@ -389,7 +389,14 @@ public class MarkerStore {
 
             String waypointId = String.valueOf(point.getOrDefault("id", i))
                     .replaceAll("[^a-zA-Z0-9_-]", "_");
-            set.getMarkers().put(id + "-wp-" + waypointId, marker);
+            // Connected fairway corridors share one logical junction and one label.
+            boolean shared = "fairway".equals(type) &&
+                    !"polygon".equals(item.get("geometry")) &&
+                    point.get("nodeId") instanceof String node && !node.isBlank();
+            String key = shared
+                    ? "shared-wp-" + ((String) point.get("nodeId")).replaceAll("[^a-zA-Z0-9_-]", "_")
+                    : id + "-wp-" + waypointId;
+            set.getMarkers().put(key, marker);
         }
     }
 

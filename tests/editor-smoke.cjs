@@ -3,6 +3,7 @@ const fs = require("node:fs");
 
 const script = fs.readFileSync("src/main/resources/assets/bluemap_marker_tool/area-draw.js", "utf8");
 const geometry = require("../src/main/resources/assets/bluemap_marker_tool/fairway-geometry.js");
+const network = require("../src/main/resources/assets/bluemap_marker_tool/fairway-network.js");
 
 class Element {
   constructor(tag) {
@@ -26,6 +27,18 @@ class Element {
   querySelector(selector) { return this.queries[selector] ??= new Element(selector); }
   querySelectorAll(selector) {
     if (this.selectorCache[selector]) return this.selectorCache[selector];
+    if (selector === "[data-route-axis]") {
+      // Unlike numeric waypoint indices, coordinate-axis values are strings.
+      const matches = [...this.innerHTML.matchAll(/<input\b[^>]*data-route-idx="(\d+)"[^>]*data-route-axis="([xyz])"[^>]*>/g)];
+      const fields = matches.map(match => {
+        const input = new Element("input");
+        input.dataset.routeIdx = match[1];
+        input.dataset.routeAxis = match[2];
+        input.value = match[0].match(/value="([^"]*)"/)?.[1] ?? "";
+        return input;
+      });
+      return this.selectorCache[selector] = fields;
+    }
     if (!selector.startsWith("[data-route-")) return [];
     const attr = selector.slice(1, -1);
     const matches = [...this.innerHTML.matchAll(new RegExp(attr + '="(\\d+)"', "g"))];
@@ -92,6 +105,7 @@ async function main() {
   };
   const window = {
     XYNFairwayGeometry: geometry,
+    XYNFairwayNetwork: network,
     bluemap: { mapViewer, markerFileManager: {} },
     location: { protocol: "https:", origin: "https://example.invalid", hostname: "example.invalid" }
   };
@@ -183,7 +197,128 @@ async function main() {
   }
   assert(writes.length >= 8);
   assert.equal(writes.at(-1).items.find(item => item.type === "fairway").points[0].name, names[0].value);
-  console.log("Marker editor and fairway/waypoint smoke tests: PASS");
+  // A second navigable corridor supports a branch from an existing junction.
+  newFairway.onclick();
+  clickMap(320); clickMap(380);
+  const corridor = writes.at(-1).items.at(-1);
+  assert.equal(corridor.geometry, "corridor");
+  const branches = editor.querySelectorAll("[data-route-branch]");
+  assert.equal(branches.length, 2);
+  assert.equal(typeof branches[0].onclick, "function");
+  branches[0].onclick();
+  let doc = writes.at(-1);
+  let child = doc.items.at(-1);
+  const parent = doc.items.at(-2);
+  assert.equal(child.points.length, 1);
+  assert.equal(child.points[0].nodeId, parent.points[0].nodeId);
+  clickMap(700); // new branch endpoint
+  doc = writes.at(-1); child = doc.items.at(-1);
+  assert.equal(child.points.length, 2);
+  assert.equal(network.buildGraph(doc.items).edges.length >= 2, true);
+
+  // Renaming the branch junction updates its counterpart on the original fairway.
+  const sharedNames = editor.querySelectorAll("[data-route-name]");
+  sharedNames[0].value = "River junction";
+  sharedNames[0].onchange();
+  doc = writes.at(-1);
+  assert.equal(doc.items.at(-2).points[0].name, "River junction");
+  assert.equal(doc.items.at(-1).points[0].name, "River junction");
+  const sharedLabels = Object.keys(sets.get("waypoints").markers).filter(k => k.startsWith("shared-wp-"));
+  assert.equal(sharedLabels.length, 1, "Connected node should have just one label");
+
+  // A fresh fairway snaps to the existing second node rather than duplicating it.
+  newFairway.onclick();
+  clickMap(452, 281); // near the visible second waypoint in the mocked projection
+  doc = writes.at(-1);
+  assert.equal(doc.items.at(-1).points.length, 1);
+  assert(doc.items.at(-1).points[0].nodeId, "expected actual snap, not undefined === undefined");
+  assert.equal(doc.items.at(-1).points[0].nodeId, doc.items.at(-3).points[1].nodeId);
+  clickMap(730);
+  doc = writes.at(-1);
+  assert.equal(doc.items.at(-1).points.length, 2);
+  assert.equal(network.buildGraph(doc.items).edges.length >= 3, true);
+  // Switching an actively connected corridor to Polygon breaks only this
+  // fairway's junction links. Local IDs, names and coordinates must survive.
+  const beforeSwitch = writes.at(-1).items.at(-1).points
+    .map(p => ({ id: p.id, name: p.name, x: p.x, z: p.z }));
+  const linkedId = writes.at(-1).items.at(-1).points[0].nodeId;
+  assert(linkedId);
+  const linkedOriginal = writes.at(-1).items.at(-3).points[1].name;
+  panel.querySelector("#xGeometry").onchange({ target: { value: "polygon" } });
+  doc = writes.at(-1);
+  assert.equal(doc.items.at(-1).geometry, "polygon");
+  assert(doc.items.at(-1).points.every(p => !("nodeId" in p)));
+  assert.deepEqual(doc.items.at(-1).points.map(p => ({
+    id: p.id, name: p.name, x: p.x, z: p.z
+  })), beforeSwitch);
+  assert.equal(doc.items.at(-3).points[1].nodeId, linkedId);
+  const detachedName = editor.querySelectorAll("[data-route-name]")[0];
+  detachedName.value = "Independent harbor boundary";
+  detachedName.onchange();
+  doc = writes.at(-1);
+  assert.equal(doc.items.at(-1).points[0].name, detachedName.value);
+  assert.equal(doc.items.at(-3).points[1].name, linkedOriginal);
+  assert.equal(network.buildGraph(doc.items).nodes.some(node => node.name === detachedName.value), false);
+
+  // Browser regression: two connected centerlines must survive an invalid drag.
+  // Use a separate water plane far enough from previous fairways to avoid snapping.
+  newFairway.onclick();
+  clickMap(320, 450); clickMap(380, 450); clickMap(440, 450);
+  let scene = writes.at(-1);
+  const mainCorridor = scene.items.at(-1);
+  assert.equal(mainCorridor.points.length, 3);
+  const mainB = mainCorridor.points[1], mainC = mainCorridor.points[2];
+  const fromMain = editor.querySelectorAll("[data-route-branch]");
+  assert.equal(fromMain.length, 3);
+  fromMain[1].onclick();
+  clickMap(500, 520);
+  scene = writes.at(-1);
+  const branchCorridor = scene.items.at(-1);
+  assert.equal(branchCorridor.points.length, 2);
+  assert(branchCorridor.points[0].nodeId, "branch must have a real shared node ID");
+  assert.equal(branchCorridor.points[0].nodeId, scene.items.at(-2).points[1].nodeId);
+  const stable = JSON.stringify(scene.items);
+  const writeCount = writes.length;
+
+  panel.querySelector("#xEditM").onclick();
+  // Mocked worldToScreen: x=400 + 0.4 * worldX, y=300 - 0.3 * Y.
+  const clickJunction = {
+    button: 0, clientX: 400 + 0.4 * mainB.x, clientY: 300 - 0.3 * branchCorridor.y,
+    target: canvas, stopPropagation() {}, preventDefault() {}
+  };
+  for (const cb of canvas.listeners.pointerdown || []) cb(clickJunction);
+  const invalidDrag = {
+    ...clickJunction, clientX: 720, clientY: 450
+  };
+  for (const cb of canvas.listeners.pointermove || []) cb(invalidDrag);
+  assert.equal(JSON.stringify(writes.at(-1).items), stable, "no invalid intermediate save");
+  for (const cb of canvas.listeners.pointerup || []) cb(invalidDrag);
+  assert.equal(writes.length, writeCount, "failed drag must not persist");
+  assert.equal(JSON.stringify(writes.at(-1).items), stable, "failed drag must be atomic");
+
+  // Valid drag must synchronize the same node in main and branch.
+  for (const cb of canvas.listeners.pointerdown || []) cb(clickJunction);
+  const goodDrag = { ...clickJunction, clientX: 367, clientY: 450 };
+  for (const cb of canvas.listeners.pointermove || []) cb(goodDrag);
+  for (const cb of canvas.listeners.pointerup || []) cb(goodDrag);
+  scene = writes.at(-1);
+  assert.equal(scene.items.at(-2).points[1].x, scene.items.at(-1).points[0].x);
+  assert.notEqual(scene.items.at(-2).points[1].x, mainB.x, "valid drag should change junction");
+  assert.equal(scene.items.at(-2).points[1].z, scene.items.at(-1).points[0].z);
+
+  // Numeric coordinate edit is also atomic, with no save on rejection.
+  const coords = editor.querySelectorAll("[data-route-axis]");
+  const branchX = coords.find(el => el.dataset.routeIdx === "0" && el.dataset.routeAxis === "x");
+  assert(branchX);
+  const currentX = scene.items.at(-1).points[0].x;
+  const saves = writes.length;
+  branchX.value = String(mainC.x + 100);
+  branchX.onchange();
+  assert.equal(writes.length, saves);
+  assert.equal(branchX.value, currentX, "rejected numeric edit must restore input");
+  assert.equal(writes.at(-1).items.at(-2).points[1].x, currentX);
+
+  console.log("Marker editor, fairway branching, polygon detach, and atomic shared drag tests: PASS");
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

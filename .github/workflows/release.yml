@@ -23,6 +23,11 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
@@ -30,11 +35,13 @@ jobs:
         run: |
           node --check src/main/resources/assets/bluemap_marker_tool/area-draw.js
           node --check src/main/resources/assets/bluemap_marker_tool/fairway-geometry.js
+          node --check src/main/resources/assets/bluemap_marker_tool/fairway-network.js
           node tests/fairway-geometry.test.cjs
+          node tests/fairway-network.test.cjs
           node tests/editor-smoke.cjs
 
       - name: Build with Gradle
-        run: ./gradlew clean jar --no-daemon
+        run: ./gradlew clean build --no-daemon
 
       - name: Find built jar
         id: jar

@@ -341,6 +341,7 @@
 
     // ---- canvas pointer handling ----
     let downXY = null;
+    let dragStart = null, dragDirty = false, dragRejected = false;
     function nearestVertex(cx, cy) {
       if (!sel) return -1;
       let best = -1, bd = 12;
@@ -350,22 +351,50 @@
     function onDown(e) {
       if (e.button !== 0 || mode === "idle") return;
       downXY = { x: e.clientX, y: e.clientY };
-      if (mode === "edit") { const vi = nearestVertex(e.clientX, e.clientY); if (vi >= 0) { dragIdx = vi; e.stopPropagation(); e.preventDefault(); } }
+      if (mode === "edit") {
+        const vi = nearestVertex(e.clientX, e.clientY);
+        if (vi >= 0) {
+          dragIdx = vi;
+          const point = sel.points[vi];
+          dragStart = { x: point.x, z: point.z };
+          dragDirty = false; dragRejected = false;
+          e.stopPropagation(); e.preventDefault();
+        }
+      }
     }
     function onMove(e) {
       if (dragIdx >= 0 && sel) {
+        e.stopPropagation();
+        if (dragRejected) return;
         const old = sel.points[dragIdx];
         const y = isRoute(sel.type) ? heightAt(old, sel) : sel.y;
         const pos = screenToWorld(e.clientX, e.clientY, y);
-        // Preserve waypoint IDs, names and per-point altitude while moving vertices.
-        sel.points[dragIdx] = { ...old, x: pos.x, z: pos.z };
-        if (sel.type === "fairway" && network) network.propagate(model.items, sel.points[dragIdx]);
+        if (sel.type === "fairway" && sel.geometry !== "polygon" && network) {
+          if (!network.moveNode(model.items, old, pos.x, pos.z)) {
+            // An invalid drag cancels the entire gesture, including previously
+            // valid intermediate positions; never persist a partial movement.
+            if (dragDirty && dragStart) network.moveNode(model.items, old, dragStart.x, dragStart.z);
+            dragDirty = false;
+            dragRejected = true;
+            preview();
+            msg("Junction movement rejected: another Fairway would become invalid");
+            return;
+          }
+        } else {
+          // Preserve waypoint IDs, names and altitude in non-network markers.
+          sel.points[dragIdx] = { ...old, x: pos.x, z: pos.z };
+        }
+        dragDirty = true;
         preview();
-        e.stopPropagation();
       }
     }
     function onUp(e) {
-      if (dragIdx >= 0) { dragIdx = -1; persist(); refresh(); e.stopPropagation(); downXY = null; return; }
+      if (dragIdx >= 0) {
+        dragIdx = -1;
+        if (dragDirty && !dragRejected) persist();
+        dragStart = null; dragDirty = false; dragRejected = false;
+        refresh(); e.stopPropagation(); downXY = null; return;
+      }
       if (!downXY || e.button !== 0 || mode === "idle") { downXY = null; return; }
       const moved = Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y); downXY = null;
       if (moved > 6 || e.target !== getCanvas() || !sel) return;
@@ -621,8 +650,17 @@
               if (!sel.points[idx] || !["x", "y", "z"].includes(axis)) return;
               const n = Number(input.value);
               if (!Number.isFinite(n)) return;
-              sel.points[idx][axis] = n;
-              if (sel.type === "fairway" && network) network.propagate(model.items, sel.points[idx]);
+              const point = sel.points[idx];
+              if ((axis === "x" || axis === "z") &&
+                  sel.type === "fairway" && sel.geometry !== "polygon" && network) {
+                const x = axis === "x" ? n : Number(point.x);
+                const z = axis === "z" ? n : Number(point.z);
+                if (!network.moveNode(model.items, point, x, z)) {
+                  input.value = point[axis];
+                  msg("Junction movement rejected: another Fairway would become invalid");
+                  return;
+                }
+              } else point[axis] = n;
               persist(); preview();
             };
           });

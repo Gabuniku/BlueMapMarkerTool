@@ -263,7 +263,8 @@ async function main() {
   scene = writes.at(-1);
   const branchCorridor = scene.items.at(-1);
   assert.equal(branchCorridor.points.length, 2);
-  assert.equal(branchCorridor.points[0].nodeId, mainB.nodeId);
+  assert(branchCorridor.points[0].nodeId, "branch must have a real shared node ID");
+  assert.equal(branchCorridor.points[0].nodeId, scene.items.at(-2).points[1].nodeId);
   const stable = JSON.stringify(scene.items);
   const writeCount = writes.length;
 

@@ -27,6 +27,18 @@ class Element {
   querySelector(selector) { return this.queries[selector] ??= new Element(selector); }
   querySelectorAll(selector) {
     if (this.selectorCache[selector]) return this.selectorCache[selector];
+    if (selector === "[data-route-axis]") {
+      // Unlike numeric waypoint indices, coordinate-axis values are strings.
+      const matches = [...this.innerHTML.matchAll(/<input\b[^>]*data-route-idx="(\d+)"[^>]*data-route-axis="([xyz])"[^>]*>/g)];
+      const fields = matches.map(match => {
+        const input = new Element("input");
+        input.dataset.routeIdx = match[1];
+        input.dataset.routeAxis = match[2];
+        input.value = match[0].match(/value="([^"]*)"/)?.[1] ?? "";
+        return input;
+      });
+      return this.selectorCache[selector] = fields;
+    }
     if (!selector.startsWith("[data-route-")) return [];
     const attr = selector.slice(1, -1);
     const matches = [...this.innerHTML.matchAll(new RegExp(attr + '="(\\d+)"', "g"))];

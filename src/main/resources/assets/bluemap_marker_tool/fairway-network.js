@@ -76,6 +76,31 @@
     return point;
   }
 
+  // Plan changes in memory and validate *all* affected waterway polygons before
+  // mutating a single waypoint. Both drag and numeric coordinate edits use this.
+  function moveNode(items, source, x, z) {
+    x = Number(x); z = Number(z);
+    if (!Number.isFinite(x) || !Number.isFinite(z) || !geometry) return false;
+    if (!items.some(item => corridor(item) && item.points.includes(source))) return false;
+
+    const updates = [];
+    for (const item of items) {
+      if (!corridor(item)) continue;
+      const affected = item.points.filter(point =>
+        point === source || (source.nodeId && point.nodeId === source.nodeId));
+      if (!affected.length) continue;
+      const proposed = item.points.map(point => affected.includes(point)
+        ? { ...point, x, z } : point);
+      if (proposed.length >= 2 &&
+          !geometry.corridorPolygon(proposed, Number(item.width ?? 40)).length) return false;
+      updates.push(...affected);
+    }
+    // No geometry or shared coordinate is modified until every check passes.
+    for (const point of updates) { point.x = x; point.z = z; }
+    return true;
+  }
+
+  // Names are independent of geometry. Coordinates must go through moveNode().
   function propagate(items, source) {
     // Ignore stale nodeIds on legacy polygon entries as well as detached nodes.
     if (!source?.nodeId || !items.some(item => corridor(item) && item.points.includes(source))) return 0;
@@ -84,7 +109,6 @@
       if (!corridor(item)) continue;
       for (const point of item.points) {
         if (point === source || point.nodeId !== source.nodeId) continue;
-        point.x = Number(source.x); point.z = Number(source.z);
         point.name = String(source.name || "");
         changes++;
       }
@@ -115,7 +139,7 @@
     return { nodes: [...nodes.values()], edges };
   }
 
-  const api = Object.freeze({ corridor, detachPolygon, ensureNodeId, createBranch, findNearbyNode, connectPoint, propagate, buildGraph });
+  const api = Object.freeze({ corridor, detachPolygon, ensureNodeId, createBranch, findNearbyNode, connectPoint, moveNode, propagate, buildGraph });
   root.XYNFairwayNetwork = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);
